@@ -1,0 +1,17 @@
+[package]
+name = "cbor"
+version = "0.1.0"  #:version
+authors = ["Andrew Gallant <jamslam@gmail.com>"]
+description = "CBOR (binary JSON) with automatic type based decoding and encoding."
+documentation = "http://burntsushi.net/rustdoc/cbor/"
+homepage = "https://github.com/BurntSushi/rust-cbor"
+repository = "https://github.com/BurntSushi/rust-cbor"
+readme = "README.md"
+keywords = ["cbor", "json", "binary", "format", "encoding"]
+license = "Unlicense"
+
+[lib]
+name = "cbor"
+
+# [dependencies]
+# rustc-serialize = "*"
