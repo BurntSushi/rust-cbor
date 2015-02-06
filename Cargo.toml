@@ -13,5 +13,6 @@ license = "Unlicense"
 [lib]
 name = "cbor"
 
-# [dependencies]
+[dependencies]
+byteorder = "*"
 # rustc-serialize = "*"
