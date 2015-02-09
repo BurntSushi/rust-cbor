@@ -1,4 +1,5 @@
 use std::borrow::{IntoCow, ToOwned};
+use std::collections::hash_map::HashMap;
 use std::old_io::{IoError, IoResult, MemReader};
 use std::old_io::Reader as IoReader;
 
@@ -68,15 +69,32 @@ impl<R: IoReader> Reader<R> {
             2 => self.read_bytes(first),
             3 => self.read_string(first),
             4 => self.read_array(first),
+            5 => self.read_map(first),
             _ => unreachable!(),
         }
+    }
+
+    fn read_map(&mut self, first: u8) -> CborResult<Cbor> {
+        let len = try!(self.read_len(first));
+        let mut map = HashMap::with_capacity(len);
+        for _ in 0..len {
+            let key = match try!(self.read_data_item(None)) {
+                Cbor::Unicode(s) => s,
+                v => return Err(self.errat(
+                    ReadError::mismatch(Type::Unicode, &v))),
+            };
+            let val = try!(self.read_data_item(None));
+            map.insert(key, val);
+        }
+        Ok(Cbor::Map(map))
     }
 
     fn read_array(&mut self, first: u8) -> CborResult<Cbor> {
         let len = try!(self.read_len(first));
         let mut array = Vec::with_capacity(len);
         for _ in 0..len {
-            array.push(try!(self.read_data_item(None)));
+            let v = try!(self.read_data_item(None));
+            array.push(v);
         }
         Ok(Cbor::Array(array))
     }
@@ -117,13 +135,38 @@ impl<R: IoReader> Reader<R> {
     fn read_int(&mut self, first: u8) -> CborResult<CborSigned> {
         Ok(match first & 0b000_11111 {
             n @ 0...23 => CborSigned::Int8(-1 - (n as i8)),
-            24 => CborSigned::Int8(-1 - (try!(self.rdr.read_byte()) as i8)),
-            25 => CborSigned::Int16(
-                -1 - try!(self.rdr.read_i16::<BigEndian>())),
-            26 => CborSigned::Int32(
-                -1 - try!(self.rdr.read_i32::<BigEndian>())),
-            27 => CborSigned::Int64(
-                -1 - try!(self.rdr.read_i64::<BigEndian>())),
+            24 => {
+                let n = try!(self.rdr.read_byte());
+                if n > ::std::i8::MAX as u8 {
+                    CborSigned::Int16(-1 - (n as i16))
+                } else {
+                    CborSigned::Int8(-1 - (n as i8))
+                }
+            }
+            25 => {
+                let n = try!(self.rdr.read_u16::<BigEndian>());
+                if n > ::std::i16::MAX as u16 {
+                    CborSigned::Int32(-1 - (n as i32))
+                } else {
+                    CborSigned::Int16(-1 - (n as i16))
+                }
+            }
+            26 => {
+                let n = try!(self.rdr.read_u32::<BigEndian>());
+                if n > ::std::i32::MAX as u32 {
+                    CborSigned::Int64(-1 - (n as i64))
+                } else {
+                    CborSigned::Int32(-1 - (n as i32))
+                }
+            }
+            27 => {
+                let n = try!(self.rdr.read_u64::<BigEndian>());
+                if n > ::std::i64::MAX as u64 {
+                    return Err(self.errstr(format!(
+                        "Negative integer out of range: {:?}", n)));
+                }
+                CborSigned::Int64(-1 - (n as i64))
+            }
             v => return Err(self.errat(
                 ReadError::InvalidAddValue { ty: Type::Int, val: v })),
         })

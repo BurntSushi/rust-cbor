@@ -86,7 +86,7 @@ impl Decoder for CborDecoder {
     }
 
     fn read_nil(&mut self) -> CborResult<()> {
-        unreachable!()
+        unimplemented!()
     }
 
     fn read_usize(&mut self) -> CborResult<usize> {
@@ -130,15 +130,15 @@ impl Decoder for CborDecoder {
     }
 
     fn read_bool(&mut self) -> CborResult<bool> {
-        unreachable!()
+        unimplemented!()
     }
 
     fn read_f64(&mut self) -> CborResult<f64> {
-        unreachable!()
+        unimplemented!()
     }
 
     fn read_f32(&mut self) -> CborResult<f32> {
-        unreachable!()
+        unimplemented!()
     }
 
     fn read_char(&mut self) -> CborResult<char> {
@@ -151,7 +151,7 @@ impl Decoder for CborDecoder {
     }
 
     fn read_str(&mut self) -> CborResult<String> {
-        match try!(self.pop_expect(Type::Unicode)) {
+        match try!(self.pop(Type::Unicode)) {
             Cbor::Unicode(s) => Ok(s),
             v => Err(self.err(ReadError::mismatch(Type::Unicode, &v))),
         }
@@ -159,7 +159,7 @@ impl Decoder for CborDecoder {
 
     fn read_enum<T, F>(&mut self, name: &str, f: F) -> CborResult<T>
             where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unreachable!()
+        unimplemented!()
     }
 
     fn read_enum_variant<T, F>(
@@ -168,7 +168,7 @@ impl Decoder for CborDecoder {
         f: F,
     ) -> CborResult<T>
     where F: FnMut(&mut CborDecoder, usize) -> CborResult<T> {
-        unreachable!()
+        unimplemented!()
     }
 
     fn read_enum_variant_arg<T, F>(
@@ -177,7 +177,7 @@ impl Decoder for CborDecoder {
         f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unreachable!()
+        unimplemented!()
     }
 
     fn read_enum_struct_variant<T, F>(
@@ -186,7 +186,7 @@ impl Decoder for CborDecoder {
         f: F,
     ) -> CborResult<T>
     where F: FnMut(&mut CborDecoder, usize) -> CborResult<T> {
-        unreachable!()
+        unimplemented!()
     }
 
     fn read_enum_struct_variant_field<T, F>(
@@ -196,7 +196,7 @@ impl Decoder for CborDecoder {
         f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unreachable!()
+        unimplemented!()
     }
 
     fn read_struct<T, F>(
@@ -206,7 +206,7 @@ impl Decoder for CborDecoder {
         f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unreachable!()
+        unimplemented!()
     }
 
     fn read_struct_field<T, F>(
@@ -216,7 +216,7 @@ impl Decoder for CborDecoder {
         f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unreachable!()
+        unimplemented!()
     }
 
     fn read_tuple<T, F>(
@@ -225,7 +225,20 @@ impl Decoder for CborDecoder {
         f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unreachable!()
+        let array = match try!(self.pop(Type::Array)) {
+            Cbor::Array(v) => v,
+            v => return Err(self.err(ReadError::mismatch(Type::Array, &v))),
+        };
+        let got_len = array.len();
+        if len != got_len {
+            return Err(self.errstr(format!(
+                "Expected tuple of length {:?}, but got array of length {:?}",
+                len, got_len)));
+        }
+        for v in array.into_iter().rev() {
+            self.stack.push(v);
+        }
+        f(self)
     }
 
     fn read_tuple_arg<T, F>(
@@ -234,7 +247,7 @@ impl Decoder for CborDecoder {
         f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unreachable!()
+        f(self)
     }
 
     fn read_tuple_struct<T, F>(
@@ -244,7 +257,20 @@ impl Decoder for CborDecoder {
         f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unreachable!()
+        let array = match try!(self.pop(Type::Array)) {
+            Cbor::Array(v) => v,
+            v => return Err(self.err(ReadError::mismatch(Type::Array, &v))),
+        };
+        let got_len = array.len();
+        if len != got_len {
+            return Err(self.errstr(format!(
+                "Expected tuple of length {:?}, but got array of length {:?}",
+                len, got_len)));
+        }
+        for v in array.into_iter().rev() {
+            self.stack.push(v);
+        }
+        f(self)
     }
 
     fn read_tuple_struct_arg<T, F>(
@@ -253,37 +279,54 @@ impl Decoder for CborDecoder {
         f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unreachable!()
+        f(self)
     }
 
     fn read_option<T, F>(&mut self, f: F) -> CborResult<T>
             where F: FnMut(&mut CborDecoder, bool) -> CborResult<T> {
-        unreachable!()
+        unimplemented!()
     }
 
     fn read_seq<T, F>(&mut self, f: F) -> CborResult<T>
             where F: FnOnce(&mut CborDecoder, usize) -> CborResult<T> {
-        unreachable!()
+        let array = match try!(self.pop(Type::Array)) {
+            Cbor::Array(v) => v,
+            v => return Err(self.err(ReadError::mismatch(Type::Array, &v))),
+        };
+        let len = array.len();
+        for v in array.into_iter().rev() {
+            self.stack.push(v);
+        }
+        f(self, len)
     }
 
     fn read_seq_elt<T, F>(&mut self, idx: usize, f: F) -> CborResult<T>
             where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unreachable!()
+        f(self)
     }
 
     fn read_map<T, F>(&mut self, f: F) -> CborResult<T>
             where F: FnOnce(&mut CborDecoder, usize) -> CborResult<T> {
-        unreachable!()
+        let map = match try!(self.pop(Type::Map)) {
+            Cbor::Map(v) => v,
+            v => return Err(self.err(ReadError::mismatch(Type::Map, &v))),
+        };
+        let len = map.len();
+        for (k, v) in map { // order doesn't matter for HashMap
+            self.stack.push(v);
+            self.stack.push(Cbor::Unicode(k));
+        }
+        f(self, len)
     }
 
     fn read_map_elt_key<T, F>(&mut self, idx: usize, f: F) -> CborResult<T>
             where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unreachable!()
+        f(self)
     }
 
     fn read_map_elt_val<T, F>(&mut self, idx: usize, f: F) -> CborResult<T>
             where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unreachable!()
+        f(self)
     }
 }
 

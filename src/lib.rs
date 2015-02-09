@@ -73,6 +73,7 @@ pub enum Type {
     Int, Int8, Int16, Int32, Int64,
     Float32, Float64,
     Bytes, Unicode, Array, Map, Tag,
+    Any,
 }
 
 #[derive(Debug)]
@@ -238,6 +239,7 @@ mod reader;
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
     use rustc_serialize::Decodable;
     use {Reader, CborDecoder};
     use ByteString;
@@ -254,22 +256,30 @@ mod test {
         // let bytes = vec![0x82, 0x19, 0x01, 0x00, 0x39, 0x01, 0xf3];
 
         // [-256, -500]
-        // let bytes = vec![0x82, 0x38, 0xff, 0x39, 0x01, 0xf3];
+        let bytes = vec![0x82, 0x38, 0xff, 0x39, 0x01, 0xf3];
 
         // u'b'
-        let bytes = vec![0x61, 0x62];
+        // let bytes = vec![0x61, 0x62];
 
         // b'b'
-        let bytes = vec![0x41, 0x62];
+        // let bytes = vec![0x41, 0x62];
+
+        // {'a': 1}
+        // let bytes = vec![0xa1, 0x61, 0x61, 0x01];
+
+        // (2 ** 64) - 1
+        // let bytes = vec![0x1b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
 
         let mut rdr = Reader::from_bytes(bytes);
         // let val = rdr.read().unwrap();
         // let v: String = Decodable::decode(&mut CborDecoder::new(val)).unwrap();
-        let v: ByteString = rdr.decode().unwrap();
-        // let v: Vec<i16> = rdr.decode().unwrap();
+        // let v: ByteString = rdr.decode().unwrap();
+        let v: Vec<i16> = rdr.decode().unwrap();
+        // let v: u64 = rdr.decode().unwrap();
         // let v: i64 = rdr.decode().unwrap();
         // let v: String = rdr.decode().unwrap();
         // let v: ByteString = rdr.decode().unwrap();
+        // let v: HashMap<String, i32> = rdr.decode().unwrap();
         lg!("{:?}", v);
     }
 }
