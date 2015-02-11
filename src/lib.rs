@@ -17,10 +17,8 @@ use std::iter::repeat;
 use std::old_io::{IoError, IoResult, MemReader};
 use std::old_io::Reader as IoReader;
 
-use rustc_serialize::{Decodable, Decoder};
-
 pub use decoder::{
-    CborDecodable, CborDecoder,
+    CborDecodable, Decoder,
     ByteString,
 };
 pub use reader::Reader;
@@ -50,6 +48,8 @@ pub enum CborError {
 pub enum ReadError {
     TypeMismatch { expected: Type, got: Type },
     InvalidAddValue { ty: Type, val: u8 },
+    Unassigned { major: u8, add: u8 },
+    Reserved { major: u8, add: u8 },
     Other(String),
 }
 
@@ -71,13 +71,17 @@ impl ReadError {
 pub enum Type {
     UInt, UInt8, UInt16, UInt32, UInt64,
     Int, Int8, Int16, Int32, Int64,
-    Float32, Float64,
+    Float, Float16, Float32, Float64,
     Bytes, Unicode, Array, Map, Tag,
-    Any,
+    Any, Null, Undefined, Bool, Break,
 }
 
 #[derive(Debug)]
 pub enum Cbor {
+    Break, // does this really belong here?
+    Undefined,
+    Null,
+    Bool(bool),
     Unsigned(CborUnsigned),
     Signed(CborSigned),
     Float(CborFloat),
@@ -85,7 +89,7 @@ pub enum Cbor {
     Unicode(String),
     Array(Vec<Cbor>),
     Map(HashMap<String, Cbor>),
-    Tag(Box<Cbor>),
+    Tag { tag: u64, data: Box<Cbor> },
 }
 
 #[derive(Copy, Debug)]
@@ -93,11 +97,15 @@ pub enum CborUnsigned { UInt8(u8), UInt16(u16), UInt32(u32), UInt64(u64) }
 #[derive(Copy, Debug)]
 pub enum CborSigned { Int8(i8), Int16(i16), Int32(i32), Int64(i64) }
 #[derive(Copy, Debug)]
-pub enum CborFloat { Float32(f32), Float64(f64) }
+pub enum CborFloat { Float16(f32), Float32(f32), Float64(f64) }
 
 impl Cbor {
     fn typ(&self) -> Type {
         match *self {
+            Cbor::Break => Type::Break,
+            Cbor::Undefined => Type::Undefined,
+            Cbor::Null => Type::Null,
+            Cbor::Bool(_) => Type::Bool,
             Cbor::Unsigned(v) => v.typ(),
             Cbor::Signed(v) => v.typ(),
             Cbor::Float(v) => v.typ(),
@@ -105,7 +113,7 @@ impl Cbor {
             Cbor::Unicode(_) => Type::Unicode,
             Cbor::Array(_) => Type::Array,
             Cbor::Map(_) => Type::Map,
-            Cbor::Tag(_) => Type::Tag,
+            Cbor::Tag { .. } => Type::Tag,
         }
     }
 }
@@ -227,9 +235,30 @@ impl CborSigned {
 impl CborFloat {
     fn typ(self) -> Type {
         match self {
+            CborFloat::Float16(_) => Type::Float16,
             CborFloat::Float32(_) => Type::Float32,
             CborFloat::Float64(_) => Type::Float64,
         }
+    }
+
+    fn to_f64(self) -> ReadResult<f64> {
+        // I don't think this can fail, but it's convenient for it to have
+        // the same return type as all of the other number conversions. ---AG
+        Ok(match self {
+            CborFloat::Float16(v) => v as f64,
+            CborFloat::Float32(v) => v as f64,
+            CborFloat::Float64(v) => v,
+        })
+    }
+
+    fn to_f32(self) -> ReadResult<f32> {
+        // I don't think this can fail, but it's convenient for it to have
+        // the same return type as all of the other number conversions. ---AG
+        Ok(match self {
+            CborFloat::Float16(v) => v,
+            CborFloat::Float32(v) => v,
+            _ => return Err(ReadError::ty_mismatch(Type::Float32, self.typ())),
+        })
     }
 }
 
@@ -241,7 +270,7 @@ mod reader;
 mod test {
     use std::collections::HashMap;
     use rustc_serialize::Decodable;
-    use {Reader, CborDecoder};
+    use {Reader, Decoder};
     use ByteString;
 
     #[test]
@@ -256,7 +285,13 @@ mod test {
         // let bytes = vec![0x82, 0x19, 0x01, 0x00, 0x39, 0x01, 0xf3];
 
         // [-256, -500]
-        let bytes = vec![0x82, 0x38, 0xff, 0x39, 0x01, 0xf3];
+        // let bytes = vec![0x82, 0x38, 0xff, 0x39, 0x01, 0xf3];
+
+        // true
+        // let bytes = vec![0xf4];
+
+        // 1.5
+        // let bytes = vec![0xfb, 0x3f, 0xf8, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0];
 
         // u'b'
         // let bytes = vec![0x61, 0x62];
@@ -270,16 +305,26 @@ mod test {
         // (2 ** 64) - 1
         // let bytes = vec![0x1b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
 
+        // Tag(500, [1, 500, 100000])
+        // ['0xd9', '0x1', '0xf4', '0x83', '0x1', '0x19', '0x1', '0xf4', '0x1a', '0x0', '0x1', '0x86', '0xa0']
+        let bytes = vec![0xd9, 0x01, 0xf4, 0x83, 0x01, 0x19, 0x01, 0xf4,
+                         0x1a, 0x00, 0x01, 0x86, 0xa0];
+
         let mut rdr = Reader::from_bytes(bytes);
         // let val = rdr.read().unwrap();
-        // let v: String = Decodable::decode(&mut CborDecoder::new(val)).unwrap();
+        // let v: String = Decodable::decode(&mut Decoder::new(val)).unwrap();
         // let v: ByteString = rdr.decode().unwrap();
-        let v: Vec<i16> = rdr.decode().unwrap();
+        // let v: Vec<i16> = rdr.decode().unwrap();
         // let v: u64 = rdr.decode().unwrap();
         // let v: i64 = rdr.decode().unwrap();
+        // let v: f64 = rdr.decode().unwrap();
         // let v: String = rdr.decode().unwrap();
         // let v: ByteString = rdr.decode().unwrap();
         // let v: HashMap<String, i32> = rdr.decode().unwrap();
-        lg!("{:?}", v);
+        // let v: Vec<f32> = rdr.decode().unwrap();
+        // let v: bool = rdr.decode().unwrap();
+
+        // lg!("{:?}", v);
+        lg!("{:?}", rdr.read().unwrap());
     }
 }

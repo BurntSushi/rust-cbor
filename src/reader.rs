@@ -2,15 +2,16 @@ use std::borrow::{IntoCow, ToOwned};
 use std::collections::hash_map::HashMap;
 use std::old_io::{IoError, IoResult, MemReader};
 use std::old_io::Reader as IoReader;
+use std::mem::transmute;
 
 use byteorder::{ReaderBytesExt, BigEndian};
 use rustc_serialize::Decodable;
 
 use {
-    Cbor, CborUnsigned, CborSigned,
+    Cbor, CborUnsigned, CborSigned, CborFloat,
     Type,
     CborResult, CborError, ReadError,
-    CborDecodable, CborDecoder,
+    CborDecodable, Decoder,
 };
 
 pub struct Reader<R> {
@@ -47,11 +48,11 @@ impl<R: IoReader> Reader<R> {
 impl<R: IoReader> Reader<R> {
     pub fn decode<D>(&mut self) -> CborResult<D> where D: CborDecodable {
         let v = try!(self.read());
-        CborDecodable::cbor_decode(&mut CborDecoder::new(v))
+        CborDecodable::cbor_decode(&mut Decoder::new(v))
     }
 
-    pub fn rustc_decode<D>(&mut self) -> CborResult<D> where D: Decodable {
-        Decodable::decode(&mut CborDecoder::new(try!(self.read())))
+    fn rustc_decode<D>(&mut self) -> CborResult<D> where D: Decodable {
+        Decodable::decode(&mut Decoder::new(try!(self.read())))
     }
 
     pub fn read(&mut self) -> CborResult<Cbor> {
@@ -70,8 +71,67 @@ impl<R: IoReader> Reader<R> {
             3 => self.read_string(first),
             4 => self.read_array(first),
             5 => self.read_map(first),
+            6 => self.read_tag(first),
+            7 => match first & 0b000_11111 {
+                v @ 0...23 => self.read_simple_value(v),
+                24 => {
+                    let b = try!(self.rdr.read_byte());
+                    self.read_simple_value(b)
+                }
+                25...27 => self.read_float(first).map(Cbor::Float),
+                v @ 28...30 =>
+                    Err(self.errat(
+                        ReadError::Unassigned { major: 7, add: v })),
+                31 => Ok(Cbor::Break),
+                // Because max(byte & 0b000_11111) == 2^5 - 1 == 31
+                _ => unreachable!(),
+            },
+            // This is truly unreachable because `byte & 0b111_00000 >> 5`
+            // can only produce 8 distinct values---each of which are handled
+            // above. ---AG
             _ => unreachable!(),
         }
+    }
+
+    fn read_simple_value(&mut self, val: u8) -> CborResult<Cbor> {
+        Ok(match val {
+            v @ 0...19 =>
+                return Err(self.errat(
+                    ReadError::Unassigned { major: 7, add: v })),
+            20 => Cbor::Bool(false),
+            21 => Cbor::Bool(true),
+            22 => Cbor::Null,
+            23 => Cbor::Undefined,
+            v @ 24...31 =>
+                return Err(self.errat(
+                    ReadError::Reserved { major: 7, add: v })),
+            v /* 32...255 */ =>
+                return Err(self.errat(
+                    ReadError::Unassigned { major: 7, add: v })),
+        })
+    }
+
+    fn read_float(&mut self, first: u8) -> CborResult<CborFloat> {
+        Ok(match first & 0b000_11111 {
+            25 => {
+                // Rust doesn't have a `f16` type, so just read a u16 and
+                // cast it to a u32 and then a f32.
+                let n = try!(self.rdr.read_u16::<BigEndian>());
+                CborFloat::Float16(unsafe { transmute(n as u32) })
+            }
+            26 => CborFloat::Float32(try!(self.rdr.read_f32::<BigEndian>())),
+            27 => CborFloat::Float64(try!(self.rdr.read_f64::<BigEndian>())),
+            // Reaching this case is probably a bug. ---AG
+            v => return Err(self.errat(
+                ReadError::InvalidAddValue { ty: Type::Float, val: v })),
+        })
+    }
+
+    fn read_tag(&mut self, first: u8) -> CborResult<Cbor> {
+        let tag = try!(self.read_uint(first));
+        let tag = try!(tag.to_u64().map_err(|err| self.errat(err)));
+        let data = try!(self.read_data_item(None));
+        Ok(Cbor::Tag { tag: tag, data: Box::new(data) })
     }
 
     fn read_map(&mut self, first: u8) -> CborResult<Cbor> {

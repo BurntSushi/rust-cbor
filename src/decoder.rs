@@ -1,7 +1,8 @@
 use std::borrow::ToOwned;
 use std::char;
 
-use rustc_serialize::{Decodable, Decoder};
+use rustc_serialize::Decodable;
+use rustc_serialize::Decoder as RustcDecoder;
 
 use {
     Cbor, Type,
@@ -10,22 +11,22 @@ use {
 };
 
 pub trait CborDecodable {
-    fn cbor_decode(d: &mut CborDecoder) -> CborResult<Self>;
+    fn cbor_decode(d: &mut Decoder) -> CborResult<Self>;
 }
 
 impl<D: Decodable> CborDecodable for D {
-    fn cbor_decode(d: &mut CborDecoder) -> CborResult<D> {
+    fn cbor_decode(d: &mut Decoder) -> CborResult<D> {
         Decodable::decode(d)
     }
 }
 
-pub struct CborDecoder {
+pub struct Decoder {
     stack: Vec<Cbor>,
 }
 
-impl CborDecoder {
-    pub fn new(val: Cbor) -> CborDecoder {
-        CborDecoder { stack: vec![val] }
+impl Decoder {
+    pub fn new(val: Cbor) -> Decoder {
+        Decoder { stack: vec![val] }
     }
 
     fn pop(&mut self, expected: Type) -> CborResult<Cbor> {
@@ -37,14 +38,12 @@ impl CborDecoder {
         }
     }
 
-    fn pop_expect(&mut self, expected: Type) -> CborResult<Cbor> {
-        self.pop(expected).and_then(|v| {
-            if v.typ() != expected {
-                Err(self.err(ReadError::mismatch(expected, &v)))
-            } else {
-                Ok(v)
-            }
-        })
+    fn pop_expect(&mut self, expected: &str) -> CborResult<Cbor> {
+        match self.stack.pop() {
+            Some(v) => Ok(v),
+            None => Err(self.errstr(format!(
+                "No data items left (expected {}).", expected))),
+        }
     }
 
     fn err(&self, err: ReadError) -> CborError {
@@ -78,7 +77,22 @@ macro_rules! read_signed {
     });
 }
 
-impl Decoder for CborDecoder {
+macro_rules! read_float {
+    ($dec:ident, $ty:ty, $cbor_ty:expr,
+     $to:ident, $toi:ident, $tou:ident) => ({
+        let v = try!($dec.pop($cbor_ty));
+        match v {
+            Cbor::Float(v) => v.$to().map_err(CborError::Decode),
+            Cbor::Signed(v) =>
+                v.$toi().map(|n| n as $ty).map_err(CborError::Decode),
+            Cbor::Unsigned(v) =>
+                v.$tou().map(|n| n as $ty).map_err(CborError::Decode),
+            ref v => return Err($dec.err(ReadError::mismatch($cbor_ty, v))),
+        }
+    });
+}
+
+impl RustcDecoder for Decoder {
     type Error = CborError;
 
     fn error(&mut self, err: &str) -> CborError {
@@ -86,7 +100,10 @@ impl Decoder for CborDecoder {
     }
 
     fn read_nil(&mut self) -> CborResult<()> {
-        unimplemented!()
+        match try!(self.pop(Type::Null)) {
+            Cbor::Null => Ok(()),
+            v => Err(self.err(ReadError::mismatch(Type::Null, &v))),
+        }
     }
 
     fn read_usize(&mut self) -> CborResult<usize> {
@@ -130,15 +147,18 @@ impl Decoder for CborDecoder {
     }
 
     fn read_bool(&mut self) -> CborResult<bool> {
-        unimplemented!()
+        match try!(self.pop(Type::Bool)) {
+            Cbor::Bool(s) => Ok(s),
+            v => Err(self.err(ReadError::mismatch(Type::Bool, &v))),
+        }
     }
 
     fn read_f64(&mut self) -> CborResult<f64> {
-        unimplemented!()
+        read_float!(self, f64, Type::Float64, to_f64, to_i64, to_u64)
     }
 
     fn read_f32(&mut self) -> CborResult<f32> {
-        unimplemented!()
+        read_float!(self, f32, Type::Float32, to_f32, to_i32, to_u32)
     }
 
     fn read_char(&mut self) -> CborResult<char> {
@@ -158,17 +178,49 @@ impl Decoder for CborDecoder {
     }
 
     fn read_enum<T, F>(&mut self, name: &str, f: F) -> CborResult<T>
-            where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unimplemented!()
+            where F: FnOnce(&mut Decoder) -> CborResult<T> {
+        f(self)
     }
 
     fn read_enum_variant<T, F>(
         &mut self,
         names: &[&str],
-        f: F,
+        mut f: F,
     ) -> CborResult<T>
-    where F: FnMut(&mut CborDecoder, usize) -> CborResult<T> {
-        unimplemented!()
+    where F: FnMut(&mut Decoder, usize) -> CborResult<T> {
+        let name = match try!(self.pop_expect("Unicode or variant map")) {
+            Cbor::Unicode(name) => name,
+            Cbor::Map(mut map) => {
+                let name = match map.remove("variant") {
+                    Some(Cbor::Unicode(name)) => name,
+                    Some(v) => return Err(self.errstr(format!(
+                        "Expected 'variant' key in variant map to map to a \
+                         Unicode string, but got {:?}", v.typ()))),
+                    None => return Err(self.errstr(format!(
+                        "Missing 'variant' key in variant map"))),
+                };
+                match map.remove("fields") {
+                    Some(Cbor::Array(fields)) => {
+                        self.stack.extend(fields.into_iter().rev());
+                    },
+                    Some(v) => return Err(self.errstr(format!(
+                        "Expected 'fields' key in variant map to map to an \
+                         Array, but got {:?}", v.typ()))),
+                    None => return Err(self.errstr(format!(
+                        "Missing 'fields' key in variant map."))),
+                }
+                name
+            }
+            v => return Err(self.errstr(format!(
+                "Expected Unicode string or variant map, but got {:?}",
+                v.typ()))),
+        };
+        let idx = match names.iter().position(|&n| n == name) {
+            Some(idx) => idx,
+            None => return Err(self.errstr(format!(
+                "Unknown variant name '{}'.", name))),
+        };
+        f(self, idx)
     }
 
     fn read_enum_variant_arg<T, F>(
@@ -176,8 +228,8 @@ impl Decoder for CborDecoder {
         a_idx: usize,
         f: F,
     ) -> CborResult<T>
-    where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unimplemented!()
+    where F: FnOnce(&mut Decoder) -> CborResult<T> {
+        f(self)
     }
 
     fn read_enum_struct_variant<T, F>(
@@ -185,8 +237,8 @@ impl Decoder for CborDecoder {
         names: &[&str],
         f: F,
     ) -> CborResult<T>
-    where F: FnMut(&mut CborDecoder, usize) -> CborResult<T> {
-        unimplemented!()
+    where F: FnMut(&mut Decoder, usize) -> CborResult<T> {
+        self.read_enum_variant(names, f)
     }
 
     fn read_enum_struct_variant_field<T, F>(
@@ -195,8 +247,8 @@ impl Decoder for CborDecoder {
         f_idx: usize,
         f: F,
     ) -> CborResult<T>
-    where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unimplemented!()
+    where F: FnOnce(&mut Decoder) -> CborResult<T> {
+        self.read_enum_variant_arg(f_idx, f)
     }
 
     fn read_struct<T, F>(
@@ -205,8 +257,19 @@ impl Decoder for CborDecoder {
         len: usize,
         f: F,
     ) -> CborResult<T>
-    where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unimplemented!()
+    where F: FnOnce(&mut Decoder) -> CborResult<T> {
+        let val = try!(f(self));
+        // When we read a struct field, we pop the CBOR map off the stack,
+        // find and remove the field name and its associated value, and then
+        // push the map back on the stack. Therefore, when we're done
+        // processing all the struct fields, we'll have an extraneous map
+        // left on the stack. So pop it off. If this assert fails, we have a
+        // bug in the decoder. ---AG
+        assert_eq!(self.stack.pop().unwrap().typ(), Type::Map);
+        // Do we want to check if the map popped off here is empty? If it's
+        // not, that means the data contains more than what the struct
+        // specifies. We should probably be relaxed and let it pass. ---AG
+        Ok(val)
     }
 
     fn read_struct_field<T, F>(
@@ -215,8 +278,24 @@ impl Decoder for CborDecoder {
         f_idx: usize,
         f: F,
     ) -> CborResult<T>
-    where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
-        unimplemented!()
+    where F: FnOnce(&mut Decoder) -> CborResult<T> {
+        let mut map = match try!(self.pop(Type::Map)) {
+            Cbor::Map(map) => map,
+            v => return Err(self.err(ReadError::mismatch(Type::Map, &v))),
+        };
+        let val = match map.remove(f_name) {
+            Some(val) => { self.stack.push(val); try!(f(self)) }
+            None => {
+                self.stack.push(Cbor::Null);
+                match f(self) {
+                    Ok(val) => val,
+                    Err(_) => return Err(self.errstr(format!(
+                        "Missing field '{}' in map object.", f_name))),
+                }
+            }
+        };
+        self.stack.push(Cbor::Map(map));
+        Ok(val)
     }
 
     fn read_tuple<T, F>(
@@ -224,7 +303,7 @@ impl Decoder for CborDecoder {
         len: usize,
         f: F,
     ) -> CborResult<T>
-    where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
+    where F: FnOnce(&mut Decoder) -> CborResult<T> {
         let array = match try!(self.pop(Type::Array)) {
             Cbor::Array(v) => v,
             v => return Err(self.err(ReadError::mismatch(Type::Array, &v))),
@@ -235,9 +314,7 @@ impl Decoder for CborDecoder {
                 "Expected tuple of length {:?}, but got array of length {:?}",
                 len, got_len)));
         }
-        for v in array.into_iter().rev() {
-            self.stack.push(v);
-        }
+        self.stack.extend(array.into_iter().rev());
         f(self)
     }
 
@@ -246,7 +323,7 @@ impl Decoder for CborDecoder {
         a_idx: usize,
         f: F,
     ) -> CborResult<T>
-    where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
+    where F: FnOnce(&mut Decoder) -> CborResult<T> {
         f(self)
     }
 
@@ -256,7 +333,7 @@ impl Decoder for CborDecoder {
         len: usize,
         f: F,
     ) -> CborResult<T>
-    where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
+    where F: FnOnce(&mut Decoder) -> CborResult<T> {
         let array = match try!(self.pop(Type::Array)) {
             Cbor::Array(v) => v,
             v => return Err(self.err(ReadError::mismatch(Type::Array, &v))),
@@ -267,9 +344,7 @@ impl Decoder for CborDecoder {
                 "Expected tuple of length {:?}, but got array of length {:?}",
                 len, got_len)));
         }
-        for v in array.into_iter().rev() {
-            self.stack.push(v);
-        }
+        self.stack.extend(array.into_iter().rev());
         f(self)
     }
 
@@ -278,35 +353,36 @@ impl Decoder for CborDecoder {
         a_idx: usize,
         f: F,
     ) -> CborResult<T>
-    where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
+    where F: FnOnce(&mut Decoder) -> CborResult<T> {
         f(self)
     }
 
-    fn read_option<T, F>(&mut self, f: F) -> CborResult<T>
-            where F: FnMut(&mut CborDecoder, bool) -> CborResult<T> {
-        unimplemented!()
+    fn read_option<T, F>(&mut self, mut f: F) -> CborResult<T>
+            where F: FnMut(&mut Decoder, bool) -> CborResult<T> {
+        match try!(self.pop(Type::Any)) {
+            Cbor::Null => f(self, false),
+            v => { self.stack.push(v); f(self, true) }
+        }
     }
 
     fn read_seq<T, F>(&mut self, f: F) -> CborResult<T>
-            where F: FnOnce(&mut CborDecoder, usize) -> CborResult<T> {
+            where F: FnOnce(&mut Decoder, usize) -> CborResult<T> {
         let array = match try!(self.pop(Type::Array)) {
             Cbor::Array(v) => v,
             v => return Err(self.err(ReadError::mismatch(Type::Array, &v))),
         };
         let len = array.len();
-        for v in array.into_iter().rev() {
-            self.stack.push(v);
-        }
+        self.stack.extend(array.into_iter().rev());
         f(self, len)
     }
 
     fn read_seq_elt<T, F>(&mut self, idx: usize, f: F) -> CborResult<T>
-            where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
+            where F: FnOnce(&mut Decoder) -> CborResult<T> {
         f(self)
     }
 
     fn read_map<T, F>(&mut self, f: F) -> CborResult<T>
-            where F: FnOnce(&mut CborDecoder, usize) -> CborResult<T> {
+            where F: FnOnce(&mut Decoder, usize) -> CborResult<T> {
         let map = match try!(self.pop(Type::Map)) {
             Cbor::Map(v) => v,
             v => return Err(self.err(ReadError::mismatch(Type::Map, &v))),
@@ -320,22 +396,22 @@ impl Decoder for CborDecoder {
     }
 
     fn read_map_elt_key<T, F>(&mut self, idx: usize, f: F) -> CborResult<T>
-            where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
+            where F: FnOnce(&mut Decoder) -> CborResult<T> {
         f(self)
     }
 
     fn read_map_elt_val<T, F>(&mut self, idx: usize, f: F) -> CborResult<T>
-            where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
+            where F: FnOnce(&mut Decoder) -> CborResult<T> {
         f(self)
     }
 }
 
 #[derive(Debug)]
-pub struct ByteString(Vec<u8>);
+pub struct ByteString(pub Vec<u8>);
 
 impl CborDecodable for ByteString {
-    fn cbor_decode(d: &mut CborDecoder) -> CborResult<ByteString> {
-        match try!(d.pop_expect(Type::Bytes)) {
+    fn cbor_decode(d: &mut Decoder) -> CborResult<ByteString> {
+        match try!(d.pop(Type::Bytes)) {
             Cbor::Bytes(s) => Ok(ByteString(s)),
             v => Err(d.err(ReadError::mismatch(Type::Bytes, &v))),
         }
