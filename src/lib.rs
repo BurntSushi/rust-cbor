@@ -263,6 +263,7 @@ impl CborFloat {
 }
 
 mod decoder;
+mod encoder;
 mod reader;
 
 
