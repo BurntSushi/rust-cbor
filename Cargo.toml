@@ -2,7 +2,7 @@
 name = "cbor"
 version = "0.1.4"  #:version
 authors = ["Andrew Gallant <jamslam@gmail.com>"]
-description = "CBOR (binary JSON) with automatic type based decoding and encoding."
+description = "CBOR (binary JSON) with type based decoding and encoding."
 documentation = "http://burntsushi.net/rustdoc/cbor/"
 homepage = "https://github.com/BurntSushi/rust-cbor"
 repository = "https://github.com/BurntSushi/rust-cbor"
@@ -12,6 +12,18 @@ license = "Unlicense"
 
 [lib]
 name = "cbor"
+
+[[bin]]
+path = "./src/bin/cbor2json.rs"
+name = "cbor2json"
+doc = false
+test = false
+
+[[bin]]
+path = "./src/bin/json2cbor.rs"
+name = "json2cbor"
+doc = false
+test = false
 
 [[test]]
 name = "tests"
