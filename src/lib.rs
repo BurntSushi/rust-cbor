@@ -15,11 +15,15 @@ for use cases that call for it.
 
 # Example: simple type based encoding and decoding
 
-This shows how to encode and decode a sequence of data items:
+In this crate, there is a `Decoder` and an `Encoder`. All reading and writing
+of CBOR must go through one of these types.
+
+The following shows how use those types to encode and decode a sequence of data
+items:
 
 ```rust
 # fn s(x: &str) -> String { x.to_string() }
-use cbor::{Cbor, CborUnsigned, Decoder, Encoder};
+use cbor::{Decoder, Encoder};
 
 // The data we want to encode. Each element in the list is encoded as its own
 // separate top-level data item.
@@ -68,8 +72,8 @@ impl Encodable for MyDataStructure {
     }
 }
 
-// Note that this type isn't needed when decoding. You can decode into your
-// `MyDataStructure` type directly:
+// Note that the special type `CborTagEncode` isn't needed when decoding. You
+// can decode into your `MyDataStructure` type directly:
 impl Decodable for MyDataStructure {
     fn decode<D: Decoder>(d: &mut D) -> Result<MyDataStructure, D::Error> {
         // Read the tag number and throw it away. YOU MUST DO THIS!
@@ -83,6 +87,34 @@ impl Decodable for MyDataStructure {
 
 Any value with type `MyDataStructure` can now be used the encoding and
 decoding methods used in the first example.
+
+# Example: convert to JSON
+
+Converting to JSON is simple because `Cbor` implements the `ToJson` trait:
+
+```rust
+# extern crate "rustc-serialize" as rustc_serialize;
+# extern crate cbor;
+# fn main() {
+# fn s(x: &str) -> String { x.to_string() }
+use cbor::{Decoder, Encoder};
+use rustc_serialize::json::{Json, ToJson};
+
+let mut e = Encoder::from_memory();
+e.encode(&[vec![(true, (), 1), (false, (), 2)]]).unwrap();
+
+let mut d = Decoder::from_bytes(e.as_bytes());
+let cbor = d.items().next().unwrap().unwrap();
+
+assert_eq!(cbor.to_json(), Json::Array(vec![
+    Json::Array(vec![Json::Boolean(true), Json::Null, Json::U64(1)]),
+    Json::Array(vec![Json::Boolean(false), Json::Null, Json::U64(2)]),
+]));
+# }
+```
+
+This crate also defines a `ToCbor` trait and implements it for the `Json` type,
+so you can convert JSON to CBOR in a similar manner as above.
 */
 #![crate_name = "cbor"]
 #![doc(html_root_url = "http://burntsushi.net/rustdoc/cbor")]
@@ -97,7 +129,6 @@ use std::collections::HashMap;
 use std::error::FromError;
 use std::fmt;
 use std::old_io::{IoError, IoErrorKind};
-use std::old_io::Writer as IoWriter;
 use rustc_serialize::Decoder as RustcDecoder;
 use rustc_serialize::Encoder as RustcEncoder;
 use rustc_serialize::{Decodable, Encodable};
@@ -253,6 +284,7 @@ pub struct CborTag {
 /// This example shows how to encode and decode a custom data type as a CBOR
 /// tag:
 ///
+///
 /// ```rust
 /// # extern crate "rustc-serialize" as rustc_serialize;
 /// # extern crate cbor;
@@ -278,8 +310,8 @@ pub struct CborTag {
 ///     }
 /// }
 ///
-/// // Note that this type isn't needed when decoding. You can decode into your
-/// // `MyDataStructure` type directly:
+/// // Note that the special type `CborTagEncode` isn't needed when decoding.
+/// // You can decode into your `MyDataStructure` type directly:
 /// impl Decodable for MyDataStructure {
 ///     fn decode<D: Decoder>(d: &mut D) -> Result<MyDataStructure, D::Error> {
 ///         // Read the tag number and throw it away. YOU MUST DO THIS!
