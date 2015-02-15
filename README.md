@@ -19,7 +19,7 @@ The API is fully documented with examples:
 
 This crate works with Cargo and is on
 [crates.io](https://crates.io/crates/cbor). The package is regularly updated.
-Add is to your `Cargo.toml` like so:
+Add it to your `Cargo.toml` like so:
 
 ```toml
 [dependencies]
@@ -58,6 +58,8 @@ fn main() {
     assert_eq!(items, data);
 }
 ```
+
+There are [more examples in the docs](http://burntsushi.net/rustdoc/cbor/).
 
 
 ### Status of implementation
