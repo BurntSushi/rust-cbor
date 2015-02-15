@@ -13,6 +13,13 @@ license = "Unlicense"
 [lib]
 name = "cbor"
 
+[[test]]
+name = "tests"
+
 [dependencies]
 byteorder = "*"
 rustc-serialize = "*"
+
+[dev-dependencies]
+quickcheck = "*"
+rand = "*"
