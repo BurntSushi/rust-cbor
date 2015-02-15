@@ -18,16 +18,25 @@ path = "./src/bin/cbor2json.rs"
 name = "cbor2json"
 doc = false
 test = false
+bench = false
 
 [[bin]]
 path = "./src/bin/json2cbor.rs"
 name = "json2cbor"
 doc = false
 test = false
+bench = false
 
 [[test]]
 name = "tests"
 test = false
+bench = false
+
+[[bench]]
+path = "./tests/bench.rs"
+name = "bench"
+test = false
+bench = true
 
 [dependencies]
 byteorder = "*"
