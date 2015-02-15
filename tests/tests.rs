@@ -40,17 +40,17 @@ fn round_trip<T>(v: T) -> bool
 
 fn encode<T: Encodable>(v: T) -> Vec<u8> {
     let mut enc = Encoder::from_memory();
-    enc.encode(v).unwrap();
+    enc.encode(&[v]).unwrap();
     enc.as_bytes().to_vec()
 }
 
 fn decode<T: Decodable>(bytes: &[u8]) -> T {
-    Decoder::from_bytes(bytes).decode().unwrap()
+    Decoder::from_bytes(bytes).decode().next().unwrap().unwrap()
 }
 
 #[allow(dead_code)]
 fn readone(bytes: &[u8]) -> Cbor {
-    Decoder::from_bytes(bytes).read().unwrap()
+    Decoder::from_bytes(bytes).items().next().unwrap().unwrap()
 }
 
 macro_rules! round_trip_num {

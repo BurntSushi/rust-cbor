@@ -1,8 +1,6 @@
 use std::borrow::ToOwned;
-use std::collections::HashMap;
 use std::char;
 
-use rustc_serialize::Decodable;
 use rustc_serialize::Decoder as RustcDecoder;
 
 use {Cbor, CborUnsigned, Type, CborResult, CborError, ReadError};
@@ -173,7 +171,7 @@ impl RustcDecoder for CborDecoder {
         }
     }
 
-    fn read_enum<T, F>(&mut self, name: &str, f: F) -> CborResult<T>
+    fn read_enum<T, F>(&mut self, _name: &str, f: F) -> CborResult<T>
             where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
         f(self)
     }
@@ -221,7 +219,7 @@ impl RustcDecoder for CborDecoder {
 
     fn read_enum_variant_arg<T, F>(
         &mut self,
-        a_idx: usize,
+        _a_idx: usize,
         f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
@@ -239,7 +237,7 @@ impl RustcDecoder for CborDecoder {
 
     fn read_enum_struct_variant_field<T, F>(
         &mut self,
-        f_name: &str,
+        _f_name: &str,
         f_idx: usize,
         f: F,
     ) -> CborResult<T>
@@ -249,8 +247,8 @@ impl RustcDecoder for CborDecoder {
 
     fn read_struct<T, F>(
         &mut self,
-        s_name: &str,
-        len: usize,
+        _s_name: &str,
+        _len: usize,
         f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
@@ -271,7 +269,7 @@ impl RustcDecoder for CborDecoder {
     fn read_struct_field<T, F>(
         &mut self,
         f_name: &str,
-        f_idx: usize,
+        _f_idx: usize,
         f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
@@ -316,7 +314,7 @@ impl RustcDecoder for CborDecoder {
 
     fn read_tuple_arg<T, F>(
         &mut self,
-        a_idx: usize,
+        _a_idx: usize,
         f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
@@ -325,7 +323,7 @@ impl RustcDecoder for CborDecoder {
 
     fn read_tuple_struct<T, F>(
         &mut self,
-        s_name: &str,
+        _s_name: &str,
         len: usize,
         f: F,
     ) -> CborResult<T>
@@ -346,7 +344,7 @@ impl RustcDecoder for CborDecoder {
 
     fn read_tuple_struct_arg<T, F>(
         &mut self,
-        a_idx: usize,
+        _a_idx: usize,
         f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
@@ -372,7 +370,7 @@ impl RustcDecoder for CborDecoder {
         f(self, len)
     }
 
-    fn read_seq_elt<T, F>(&mut self, idx: usize, f: F) -> CborResult<T>
+    fn read_seq_elt<T, F>(&mut self, _idx: usize, f: F) -> CborResult<T>
             where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
         f(self)
     }
@@ -391,12 +389,12 @@ impl RustcDecoder for CborDecoder {
         f(self, len)
     }
 
-    fn read_map_elt_key<T, F>(&mut self, idx: usize, f: F) -> CborResult<T>
+    fn read_map_elt_key<T, F>(&mut self, _idx: usize, f: F) -> CborResult<T>
             where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
         f(self)
     }
 
-    fn read_map_elt_val<T, F>(&mut self, idx: usize, f: F) -> CborResult<T>
+    fn read_map_elt_val<T, F>(&mut self, _idx: usize, f: F) -> CborResult<T>
             where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
         f(self)
     }

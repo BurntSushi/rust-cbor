@@ -1,48 +1,46 @@
-use std::old_io::{BufferedWriter, IoResult};
+use std::iter::IntoIterator;
+use std::old_io::BufferedWriter;
 use std::old_io::Writer as IoWriter;
 use std::u8;
 use std::u16;
 use std::u32;
-use std::u64;
 
-use byteorder::{ByteOrder, WriterBytesExt, BigEndian};
+use byteorder::{ByteOrder, BigEndian};
 use rustc_serialize::Encodable;
 use rustc_serialize::Encoder as RustcEncoder;
 
 use {CborError, CborResult, Type, WriteError};
 
+/// Encodes Rust values to CBOR bytes in the underlying writer `W`.
+///
+/// Note that currently, using the serialization infrastructure is the only
+/// way to write CBOR in this crate.
 pub struct Encoder<W> {
-    buf: BufferedWriter<W>,
+    buf: W,
     emitting_key: bool,
     byte_string: bool,
     tag: bool,
 }
 
-impl<W: IoWriter> IoWriter for Encoder<W> {
-    fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
-        self.buf.write_all(buf)
-    }
-}
-
 impl<W: IoWriter> Encoder<W> {
-    pub fn write_num(&mut self, major: u8, n: u64) -> CborResult<()> {
+    fn write_num(&mut self, major: u8, n: u64) -> CborResult<()> {
         let major = major << 5;
         if n <= 23 {
-            fromerr!(self.write_all(&[major | n as u8]))
+            fromerr!(self.buf.write_all(&[major | n as u8]))
         } else if n <= u8::MAX as u64 {
-            fromerr!(self.write_all(&[major | 24, n as u8]))
+            fromerr!(self.buf.write_all(&[major | 24, n as u8]))
         } else if n <= u16::MAX as u64 {
             let mut buf = [major | 25, 0, 0];
             <BigEndian as ByteOrder>::write_u16(&mut buf[1..], n as u16);
-            fromerr!(self.write_all(&buf))
+            fromerr!(self.buf.write_all(&buf))
         } else if n <= u32::MAX as u64 {
             let mut buf = [major | 26, 0, 0, 0, 0];
             <BigEndian as ByteOrder>::write_u32(&mut buf[1..], n as u32);
-            fromerr!(self.write_all(&buf))
+            fromerr!(self.buf.write_all(&buf))
         } else {
             let mut buf = [major | 27, 0, 0, 0, 0, 0, 0, 0, 0];
             <BigEndian as ByteOrder>::write_u64(&mut buf[1..], n);
-            fromerr!(self.write_all(&buf))
+            fromerr!(self.buf.write_all(&buf))
         }
     }
 
@@ -59,29 +57,65 @@ impl<W: IoWriter> Encoder<W> {
     }
 }
 
-impl Encoder<Vec<u8>> {
-    pub fn from_memory() -> Encoder<Vec<u8>> {
-        Encoder::from_writer(Vec::with_capacity(1024 * 64))
-    }
-
-    pub fn as_bytes(&mut self) -> &[u8] {
-        self.buf.flush().unwrap();
-        self.buf.get_ref()
-    }
-}
-
 impl<W: IoWriter> Encoder<W> {
-    pub fn from_writer(wtr: W) -> Encoder<W> {
+    /// Encode CBOR to an arbitrary writer.
+    pub fn from_writer(wtr: W) -> Encoder<BufferedWriter<W>> {
+        Encoder::from_writer_raw(BufferedWriter::new(wtr))
+    }
+
+    fn from_writer_raw(wtr: W) -> Encoder<W> {
         Encoder {
-            buf: BufferedWriter::new(wtr),
+            buf: wtr,
             emitting_key: false,
             byte_string: false,
             tag: false,
         }
     }
 
-    pub fn encode<E: Encodable>(&mut self, v: E) -> CborResult<()> {
-        v.encode(self)
+    /// Encode an iterator of Rust values to CBOR in the underlying writer.
+    ///
+    /// Every value in the iterator must satisfy `Encodable` (from the
+    /// `rustc-serialize` crate).
+    ///
+    /// Note that this encodes top-level CBOR data items. They can be decoded
+    /// in a streaming fashion.
+    ///
+    /// # Example
+    ///
+    /// Encode a list of numbers.
+    ///
+    /// ```rust
+    /// use cbor::Encoder;
+    ///
+    /// let mut enc = Encoder::from_memory();
+    /// enc.encode(&[1, 2, 3, 4, 5]);
+    /// assert_eq!(enc.as_bytes(), vec![1, 2, 3, 4, 5]);
+    /// ```
+    pub fn encode<I>(&mut self, it: I) -> CborResult<()>
+        where I: IntoIterator,
+              <<I as IntoIterator>::IntoIter as Iterator>::Item: Encodable {
+        for v in it.into_iter() {
+            try!(v.encode(self))
+        }
+        Ok(())
+    }
+
+    /// Flush the underlying writer.
+    pub fn flush(&mut self) -> CborResult<()> {
+        fromerr!(self.buf.flush())
+    }
+}
+
+impl Encoder<Vec<u8>> {
+    /// Encode CBOR to an in memory buffer.
+    pub fn from_memory() -> Encoder<Vec<u8>> {
+        Encoder::from_writer_raw(Vec::with_capacity(1024 * 64))
+    }
+
+    /// Flush and retrieve the CBOR bytes that have been written.
+    pub fn as_bytes(&mut self) -> &[u8] {
+        self.flush().unwrap();
+        &self.buf
     }
 }
 
@@ -107,7 +141,7 @@ impl<W: IoWriter> RustcEncoder for Encoder<W> {
 
     fn emit_nil(&mut self) -> CborResult<()> {
         no_string_key!(self, Type::Null);
-        fromerr!(self.write_all(&[(7 << 5) | 22]))
+        fromerr!(self.buf.write_all(&[(7 << 5) | 22]))
     }
 
     fn emit_usize(&mut self, v: usize) -> CborResult<()> {
@@ -137,7 +171,7 @@ impl<W: IoWriter> RustcEncoder for Encoder<W> {
     fn emit_u8(&mut self, v: u8) -> CborResult<()> {
         no_string_key!(self, Type::UInt8);
         if self.byte_string {
-            fromerr!(self.write_all(&[v]))
+            fromerr!(self.buf.write_all(&[v]))
         } else {
             self.write_uint(v as u64)
         }
@@ -172,20 +206,20 @@ impl<W: IoWriter> RustcEncoder for Encoder<W> {
         no_string_key!(self, Type::Float64);
         let mut buf = [(7 << 5) | 27, 0, 0, 0, 0, 0, 0, 0, 0];
         <BigEndian as ByteOrder>::write_f64(&mut buf[1..], v);
-        fromerr!(self.write_all(&buf))
+        fromerr!(self.buf.write_all(&buf))
     }
 
     fn emit_f32(&mut self, v: f32) -> CborResult<()> {
         no_string_key!(self, Type::Float32);
         let mut buf = [(7 << 5) | 26, 0, 0, 0, 0];
         <BigEndian as ByteOrder>::write_f32(&mut buf[1..], v);
-        fromerr!(self.write_all(&buf))
+        fromerr!(self.buf.write_all(&buf))
     }
 
     fn emit_bool(&mut self, v: bool) -> CborResult<()> {
         no_string_key!(self, Type::Bool);
         let n = if v { 21 } else { 20 };
-        fromerr!(self.write_all(&[(7 << 5) | n]))
+        fromerr!(self.buf.write_all(&[(7 << 5) | n]))
     }
 
     fn emit_char(&mut self, v: char) -> CborResult<()> {
@@ -195,10 +229,10 @@ impl<W: IoWriter> RustcEncoder for Encoder<W> {
 
     fn emit_str(&mut self, v: &str) -> CborResult<()> {
         try!(self.write_num(3, v.len() as u64));
-        fromerr!(self.write_all(v.as_bytes()))
+        fromerr!(self.buf.write_all(v.as_bytes()))
     }
 
-    fn emit_enum<F>(&mut self, name: &str, f: F) -> CborResult<()>
+    fn emit_enum<F>(&mut self, _name: &str, f: F) -> CborResult<()>
             where F: FnOnce(&mut Encoder<W>) -> CborResult<()> {
         f(self)
     }
@@ -206,7 +240,7 @@ impl<W: IoWriter> RustcEncoder for Encoder<W> {
     fn emit_enum_variant<F>(
         &mut self,
         v_name: &str,
-        v_id: usize,
+        _v_id: usize,
         len: usize,
         f: F,
     ) -> CborResult<()>
@@ -223,7 +257,7 @@ impl<W: IoWriter> RustcEncoder for Encoder<W> {
         f(self)
     }
 
-    fn emit_enum_variant_arg<F>(&mut self, idx: usize, f: F) -> CborResult<()>
+    fn emit_enum_variant_arg<F>(&mut self, _idx: usize, f: F) -> CborResult<()>
             where F: FnOnce(&mut Encoder<W>) -> CborResult<()> {
         no_string_key!(self);
         f(self)
@@ -243,7 +277,7 @@ impl<W: IoWriter> RustcEncoder for Encoder<W> {
 
     fn emit_enum_struct_variant_field<F>(
         &mut self,
-        f_name: &str,
+        _f_name: &str,
         idx: usize,
         f: F,
     ) -> CborResult<()>
@@ -282,7 +316,7 @@ impl<W: IoWriter> RustcEncoder for Encoder<W> {
     fn emit_struct_field<F>(
         &mut self,
         f_name: &str,
-        f_idx: usize,
+        _f_idx: usize,
         f: F,
     ) -> CborResult<()>
     where F: FnOnce(&mut Encoder<W>) -> CborResult<()> {
@@ -307,7 +341,7 @@ impl<W: IoWriter> RustcEncoder for Encoder<W> {
 
     fn emit_tuple_struct<F>(
         &mut self,
-        name: &str,
+        _name: &str,
         len: usize,
         f: F,
     ) -> CborResult<()>
@@ -352,7 +386,7 @@ impl<W: IoWriter> RustcEncoder for Encoder<W> {
         f(self)
     }
 
-    fn emit_seq_elt<F>(&mut self, idx: usize, f: F) -> CborResult<()>
+    fn emit_seq_elt<F>(&mut self, _idx: usize, f: F) -> CborResult<()>
             where F: FnOnce(&mut Encoder<W>) -> CborResult<()> {
         no_string_key!(self);
         f(self)
@@ -365,7 +399,7 @@ impl<W: IoWriter> RustcEncoder for Encoder<W> {
         f(self)
     }
 
-    fn emit_map_elt_key<F>(&mut self, idx: usize, f: F) -> CborResult<()>
+    fn emit_map_elt_key<F>(&mut self, _idx: usize, f: F) -> CborResult<()>
             where F: FnOnce(&mut Encoder<W>) -> CborResult<()> {
         no_string_key!(self);
         self.emitting_key = true;
@@ -374,7 +408,7 @@ impl<W: IoWriter> RustcEncoder for Encoder<W> {
         r
     }
 
-    fn emit_map_elt_val<F>(&mut self, idx: usize, f: F) -> CborResult<()>
+    fn emit_map_elt_val<F>(&mut self, _idx: usize, f: F) -> CborResult<()>
             where F: FnOnce(&mut Encoder<W>) -> CborResult<()> {
         no_string_key!(self);
         f(self)

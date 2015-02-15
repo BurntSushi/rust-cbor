@@ -1,21 +1,102 @@
+/*!
+This crate provides an implementation of [RFC
+7049](https://tools.ietf.org/html/rfc7049), which specifies Concise Binary
+Object Representation (CBOR). CBOR adopts and modestly builds on the *data
+model* used by JSON, except the encoding is in binary form. Its primary goals
+include a balance of implementation size, message size and extensibility.
+
+The implementation here is mostly complete. It includes a mechanism for
+serializing and deserializing your own tags, but it does not yet support
+indefinite length encoding.
+
+This library is primarily used with type-based encoding and decoding via the
+`rustc-serialize` infrastructure, but the raw CBOR abstract syntax is exposed
+for use cases that call for it.
+
+# Example: simple type based encoding and decoding
+
+This shows how to encode and decode a sequence of data items:
+
+```rust
+# fn s(x: &str) -> String { x.to_string() }
+use cbor::{Cbor, CborUnsigned, Decoder, Encoder};
+
+// The data we want to encode. Each element in the list is encoded as its own
+// separate top-level data item.
+let data = vec![(s("a"), 1), (s("b"), 2), (s("c"), 3)];
+
+// Create an in memory encoder. Use `Encoder::from_writer` to write to anything
+// that implements `Writer`.
+let mut e = Encoder::from_memory();
+e.encode(&data).unwrap();
+
+// Create an in memory decoder. Use `Decoder::from_reader` to read from
+// anything that implements `Reader`.
+let mut d = Decoder::from_bytes(e.as_bytes());
+let items: Vec<(String, i32)> = d.decode().collect::<Result<_, _>>().unwrap();
+
+assert_eq!(items, data);
+```
+
+# Example: encode and decode custom tags
+
+This example shows how to encode and decode a custom data type as a CBOR
+tag:
+
+```rust
+# extern crate "rustc-serialize" as rustc_serialize;
+# extern crate cbor;
+# fn main() {
+use cbor::CborTagEncode;
+use rustc_serialize::{Decodable, Decoder, Encodable, Encoder};
+
+struct MyDataStructure {
+    data: Vec<u32>,
+}
+
+impl Encodable for MyDataStructure {
+    fn encode<E: Encoder>(&self, e: &mut E) -> Result<(), E::Error> {
+        CborTagEncode {
+            // See a list of tags here:
+            // http://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
+            //
+            // It is OK to choose your own tag number, but it's probably
+            // best to choose one that is unassigned in the IANA registry.
+            tag: 100_000,
+            data: &self.data,
+        }.encode(e)
+    }
+}
+
+// Note that this type isn't needed when decoding. You can decode into your
+// `MyDataStructure` type directly:
+impl Decodable for MyDataStructure {
+    fn decode<D: Decoder>(d: &mut D) -> Result<MyDataStructure, D::Error> {
+        // Read the tag number and throw it away. YOU MUST DO THIS!
+        try!(d.read_u64());
+        // The *next* data item is the actual data.
+        Ok(MyDataStructure { data: try!(Decodable::decode(d)) })
+    }
+}
+# }
+```
+
+Any value with type `MyDataStructure` can now be used the encoding and
+decoding methods used in the first example.
+*/
 #![crate_name = "cbor"]
 #![doc(html_root_url = "http://burntsushi.net/rustdoc/cbor")]
 
-#![allow(dead_code, unused_imports, unused_variables,
-         missing_copy_implementations)]
-
+#![deny(missing_docs)]
 #![feature(core, io)]
 
 extern crate byteorder;
 extern crate "rustc-serialize" as rustc_serialize;
 
-use std::borrow::{IntoCow, ToOwned};
-use std::char;
 use std::collections::HashMap;
 use std::error::FromError;
-use std::iter::repeat;
-use std::old_io::{IoError, IoResult, MemReader};
-use std::old_io::Reader as IoReader;
+use std::fmt;
+use std::old_io::{IoError, IoErrorKind};
 use std::old_io::Writer as IoWriter;
 use rustc_serialize::Decoder as RustcDecoder;
 use rustc_serialize::Encoder as RustcEncoder;
@@ -23,6 +104,7 @@ use rustc_serialize::{Decodable, Encodable};
 
 pub use decoder::Decoder;
 pub use encoder::Encoder;
+pub use json::ToCbor;
 
 // A trivial logging macro. No reason to pull in `log`, which has become
 // difficult to use in tests.
@@ -37,6 +119,10 @@ macro_rules! fromerr {
     ($e:expr) => ($e.map_err(::std::error::FromError::from_error));
 }
 
+/// All core types defined in the CBOR specification.
+///
+/// For the most part, this is used for convenient error reporting.
+#[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Type {
     UInt, UInt8, UInt16, UInt32, UInt64,
@@ -46,34 +132,179 @@ pub enum Type {
     Any, Null, Undefined, Bool, Break,
 }
 
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+/// CBOR abstract syntax.
+///
+/// This type can represent any data item described in the CBOR specification
+/// with some restrictions. Namely, CBOR maps are limited to Unicode string
+/// keys.
+///
+/// Note that this representation distinguishes the size of an encoded number.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Cbor {
+    /// A code used to signify the end of an indefinite length data item.
     Break, // does this really belong here?
+    /// An undefined data item (major type 7, value 23).
     Undefined,
+    /// A null data item (major type 7, value 22).
     Null,
+    /// A boolean data item (major type 7, values 20 or 21).
     Bool(bool),
+    /// An unsigned integer (major type 0).
     Unsigned(CborUnsigned),
+    /// A negative integer (major type 1).
     Signed(CborSigned),
+    /// An IEEE 754 floating point number (major type 7).
     Float(CborFloat),
+    /// A byte string (major type 2).
     Bytes(CborBytes),
+    /// A Unicode string (major type 3).
     Unicode(String),
+    /// An array (major type 4).
     Array(Vec<Cbor>),
+    /// A map (major type 5).
     Map(HashMap<String, Cbor>),
+    /// A tag (major type 6).
     Tag(CborTag),
 }
 
+/// An unsigned integer (major type 0).
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, RustcDecodable)]
-pub enum CborUnsigned { UInt8(u8), UInt16(u16), UInt32(u32), UInt64(u64) }
+pub enum CborUnsigned {
+    /// Unsigned 8 bit integer.
+    UInt8(u8),
+    /// Unsigned 16 bit integer.
+    UInt16(u16),
+    /// Unsigned 32 bit integer.
+    UInt32(u32),
+    /// Unsigned 64 bit integer.
+    UInt64(u64)
+}
+
+/// A negative integer (major type 1).
+///
+/// Note that while the number `-255` can be encoded using two bytes as a
+/// CBOR `uint8`, it is outside the range of numbers allowed in `i8`.
+/// Therefore, when CBOR data is decoded, `-225` is stored as in `i16` in
+/// memory.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, RustcDecodable)]
-pub enum CborSigned { Int8(i8), Int16(i16), Int32(i32), Int64(i64) }
+pub enum CborSigned {
+    /// Negative 8 bit integer.
+    Int8(i8),
+    /// Negative 16 bit integer.
+    Int16(i16),
+    /// Negative 32 bit integer.
+    Int32(i32),
+    /// Negative 64 bit integer.
+    Int64(i64),
+}
+
+/// An IEEE 754 floating point number (major type 7).
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, RustcDecodable)]
-pub enum CborFloat { Float16(f32), Float32(f32), Float64(f64) }
+pub enum CborFloat {
+    /// IEEE 754 half-precision float.
+    ///
+    /// *WARNING*: This may be broken right now. ---AG
+    Float16(f32),
+    /// IEEE 754 single-precision float.
+    Float32(f32),
+    /// IEEE 754 double-precision float.
+    Float64(f64),
+}
+
+/// A byte string (major type 2).
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, RustcEncodable)]
 pub struct CborBytes(pub Vec<u8>);
+
+/// A tag (major type 6).
+///
+/// Note that if you want to *encode* a tag, you should use the `CborTagEncode`
+/// type and *not* this type. This type is only useful when your manually
+/// expecting the structure of a CBOR data item.
 #[derive(Clone, Debug, PartialEq, RustcEncodable)]
-pub struct CborTag { pub tag: u64, pub data: Box<Cbor> }
+pub struct CborTag {
+    /// The tag number.
+    ///
+    /// You can see a list of currently assigned tag numbers here:
+    /// http://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
+    ///
+    /// Note that it is OK to choose your own tag number for your own
+    /// application specific purpose, but it should probably be one that is
+    /// currently unassigned in the IANA registry.
+    pub tag: u64,
+
+    /// The data item, represented in terms of CBOR abstract syntax.
+    pub data: Box<Cbor>,
+}
+
+/// A special type that can be used to encode CBOR tags.
+///
+/// This is a "special" type because its used is hard-coded into the
+/// implementation of the encoder. When encoded, the encoder will make sure
+/// that it is properly represented as a CBOR tag.
+///
+/// # Example
+///
+/// This example shows how to encode and decode a custom data type as a CBOR
+/// tag:
+///
+/// ```rust
+/// # extern crate "rustc-serialize" as rustc_serialize;
+/// # extern crate cbor;
+/// # fn main() {
+/// use cbor::CborTagEncode;
+/// use rustc_serialize::{Decodable, Decoder, Encodable, Encoder};
+///
+/// struct MyDataStructure {
+///     data: Vec<u32>,
+/// }
+///
+/// impl Encodable for MyDataStructure {
+///     fn encode<E: Encoder>(&self, e: &mut E) -> Result<(), E::Error> {
+///         CborTagEncode {
+///             // See a list of tags here:
+///             // http://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
+///             //
+///             // It is OK to choose your own tag number, but it's probably
+///             // best to choose one that is unassigned in the IANA registry.
+///             tag: 100_000,
+///             data: &self.data,
+///         }.encode(e)
+///     }
+/// }
+///
+/// // Note that this type isn't needed when decoding. You can decode into your
+/// // `MyDataStructure` type directly:
+/// impl Decodable for MyDataStructure {
+///     fn decode<D: Decoder>(d: &mut D) -> Result<MyDataStructure, D::Error> {
+///         // Read the tag number and throw it away. YOU MUST DO THIS!
+///         try!(d.read_u64());
+///         // The *next* data item is the actual data.
+///         Ok(MyDataStructure { data: try!(Decodable::decode(d)) })
+///     }
+/// }
+/// # }
+/// ```
 #[derive(Clone, Debug, PartialEq, RustcEncodable)]
-pub struct CborTagEncode<'a, T: 'a> { pub tag: u64, pub data: &'a T }
+pub struct CborTagEncode<'a, T: 'a> {
+    /// The tag number.
+    ///
+    /// You can see a list of currently assigned tag numbers here:
+    /// http://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
+    ///
+    /// Note that it is OK to choose your own tag number for your own
+    /// application specific purpose, but it should probably be one that is
+    /// currently unassigned in the IANA registry.
+    pub tag: u64,
+
+    /// The actual data item to encode.
+    pub data: &'a T,
+}
 
 impl Cbor {
     fn typ(&self) -> Type {
@@ -290,36 +521,101 @@ impl Encodable for CborFloat {
     }
 }
 
+impl ::std::ops::Deref for CborBytes {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] { &self.0 }
+}
+
+impl ::std::ops::DerefMut for CborBytes {
+    fn deref_mut(&mut self) -> &mut [u8] { &mut self.0 }
+}
+
 impl Decodable for CborBytes {
     fn decode<D: RustcDecoder>(d: &mut D) -> Result<CborBytes, D::Error> {
         Decodable::decode(d).map(CborBytes)
     }
 }
 
+/// Type synonym for `Result<T, CborError>`.
 pub type CborResult<T> = Result<T, CborError>;
+
+/// Type synonym for `Result<T, ReadError>`.
 type ReadResult<T> = Result<T, ReadError>;
 
-#[derive(Debug)]
+/// Errors that can be produced by a CBOR operation.
+#[derive(Clone, Debug)]
 pub enum CborError {
+    /// An error as a result of an  underlying IO operation.
     Io(IoError),
+    /// An error from the type based decoder.
     Decode(ReadError), // decoder loses byte offset information :-(
+    /// An error from the type based encoder.
     Encode(WriteError),
-    AtOffset { kind: ReadError, offset: usize },
+    /// An error reading CBOR at a particular offset.
+    ///
+    /// For example, if the data in "additional information" is inconsistent
+    /// with the major type.
+    AtOffset {
+        /// The exact read error.
+        kind: ReadError,
+        /// The byte offset at which the error occurred.
+        offset: usize,
+    },
 }
 
-#[derive(Debug)]
+impl CborError {
+    fn is_eof(&self) -> bool {
+        match *self {
+            CborError::Io(IoError {kind: IoErrorKind::EndOfFile, ..}) => true,
+            _ => false,
+        }
+    }
+}
+
+/// An error produced by reading CBOR data.
+#[derive(Clone, Debug)]
 pub enum ReadError {
-    TypeMismatch { expected: Type, got: Type },
-    InvalidAddValue { ty: Type, val: u8 },
-    Unassigned { major: u8, add: u8 },
-    Reserved { major: u8, add: u8 },
+    /// An error for when the expected type does not match the received type.
+    TypeMismatch {
+        /// Expected CBOR type.
+        expected: Type,
+        /// Received CBOR type.
+        got: Type,
+    },
+    /// When the additional information is inconsistent with the major type.
+    InvalidAddValue {
+        /// CBOR type.
+        ty: Type,
+        /// Additional information value.
+        val: u8,
+    },
+    /// The value found is unassigned.
+    Unassigned {
+        /// CBOR major type value.
+        major: u8,
+        /// Additional information value.
+        add: u8,
+    },
+    /// The value found is reserved.
+    Reserved {
+        /// CBOR major type value.
+        major: u8,
+        /// Additional information value.
+        add: u8,
+    },
+    /// Some other error occurred.
     Other(String),
 }
 
-#[derive(Debug)]
+/// An error produced by writing CBOR data.
+#[derive(Clone, Debug)]
 pub enum WriteError {
-    TypeMismatch { expected: Type, got: Type },
-    InvalidMapKey { got: Option<Type> },
+    /// Occurs when writing a map key that isn't a Unicode string.
+    InvalidMapKey {
+        /// The received type (if that information is available).
+        got: Option<Type>,
+    },
 }
 
 impl FromError<IoError> for CborError {
@@ -336,6 +632,61 @@ impl ReadError {
     }
 }
 
+impl fmt::Display for CborError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            CborError::Io(ref err) => write!(f, "{}", err),
+            CborError::Decode(ref err) => {
+                write!(f, "Error while decoding: {}", err)
+            }
+            CborError::Encode(ref err) => {
+                write!(f, "Error while encoding: {}", err)
+            }
+            CborError::AtOffset { ref kind, offset } => {
+                write!(f, "Error at byte offset {:?}: {}", offset, kind)
+            }
+        }
+    }
+}
+
+impl fmt::Display for ReadError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            ReadError::TypeMismatch { expected, got } => {
+                write!(f, "Expected type {:?}, but found {:?}.", expected, got)
+            }
+            ReadError::InvalidAddValue { ty, val } => {
+                write!(f, "Invalid additional information ({:?}) \
+                           for type {:?}", val, ty)
+            }
+            ReadError::Unassigned { major, add } => {
+                write!(f, "Found unassigned value (major type: {:?}, \
+                           additional information: {:?})", major, add)
+            }
+            ReadError::Reserved { major, add } => {
+                write!(f, "Found reserved value (major type: {:?}, \
+                           additional information: {:?})", major, add)
+            }
+            ReadError::Other(ref s) => write!(f, "{}", s),
+        }
+    }
+}
+
+impl fmt::Display for WriteError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            WriteError::InvalidMapKey { got: Some(got) } => {
+                write!(f, "Found invalid map key ({:?}), \
+                           expected Unicode string.", got)
+            }
+            WriteError::InvalidMapKey { got: None } => {
+                write!(f, "Found invalid map key, expected Unicode string.")
+            }
+        }
+    }
+}
+
 mod decoder;
 mod encoder;
+mod json;
 mod rustc_decoder;

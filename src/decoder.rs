@@ -1,6 +1,6 @@
-use std::borrow::{IntoCow, ToOwned};
+use std::borrow::IntoCow;
 use std::collections::hash_map::HashMap;
-use std::old_io::{IoError, IoResult, MemReader};
+use std::old_io::{IoResult, MemReader};
 use std::old_io::Reader as IoReader;
 use std::mem::transmute;
 
@@ -13,44 +13,80 @@ use {
     CborResult, CborError, ReadError,
 };
 
+/// Read CBOR data items into Rust values from the underlying reader `R`.
 pub struct Decoder<R> {
     rdr: CborReader<R>,
 }
 
-impl Decoder<MemReader> {
-    pub fn from_bytes<'a, T>(bytes: T) -> Decoder<MemReader>
-            where T: IntoCow<'a, Vec<u8>, [u8]> {
-        Decoder::from_reader(MemReader::new(bytes.into_cow().into_owned()))
-    }
-}
-
 impl<R: IoReader> Decoder<R> {
+    /// Create a new CBOR decoder from the underlying reader.
     pub fn from_reader(rdr: R) -> Decoder<R> {
         Decoder { rdr: CborReader::new(rdr) }
     }
-}
 
-impl<R: IoReader> Decoder<R> {
-    fn errat(&self, err: ReadError) -> CborError {
-        CborError::AtOffset { kind: err, offset: self.rdr.last_offset }
+    /// Decode a sequence of top-level CBOR data items into Rust values.
+    ///
+    /// # Example
+    ///
+    /// This shows how to encode and decode a sequence of data items:
+    ///
+    /// ```rust
+    /// use cbor::{Decoder, Encoder};
+    ///
+    /// let data = vec![("a".to_string(), 1), ("b".to_string(), 2),
+    ///                 ("c".to_string(), 3)];
+    ///
+    /// let mut enc = Encoder::from_memory();
+    /// enc.encode(&data).unwrap();
+    ///
+    /// let mut dec = Decoder::from_bytes(enc.as_bytes());
+    /// let items: Vec<(String, i32)> = dec.decode()
+    ///                                    .collect::<Result<_, _>>()
+    ///                                    .unwrap();
+    ///
+    /// assert_eq!(items, data);
+    /// ```
+    pub fn decode<D: Decodable>(&mut self) -> DecodedItems<R, D> {
+        DecodedItems { it: self.items() }
     }
 
-    fn errty(&self, expected: Type, got: Type) -> CborError {
-        self.errat(ReadError::TypeMismatch { expected: expected, got: got })
-    }
-
-    fn errstr(&self, s: String) -> CborError {
-        self.errat(ReadError::Other(s))
-    }
-}
-
-impl<R: IoReader> Decoder<R> {
-    pub fn decode<D>(&mut self) -> CborResult<D> where D: Decodable {
-        Decodable::decode(&mut CborDecoder::new(try!(self.read())))
-    }
-
-    pub fn read(&mut self) -> CborResult<Cbor> {
-        self.read_data_item(None)
+    /// Read a sequence of top-level CBOR data items.
+    ///
+    /// This yields data items represented by the `Cbor` type, which is its
+    /// abstract syntax. (Using the `decode` iterator is probably much more
+    /// convenient, but this is useful when you need to do more sophisticated
+    /// analysis on the CBOR data.)
+    ///
+    /// # Example
+    ///
+    /// This shows how to encode and decode a sequence of data items:
+    ///
+    /// ```rust
+    /// use cbor::{Cbor, CborUnsigned, Decoder, Encoder};
+    ///
+    /// let mut enc = Encoder::from_memory();
+    /// enc.encode(vec![("a", 1), ("b", 2), ("c", 3)]).unwrap();
+    ///
+    /// let mut dec = Decoder::from_bytes(enc.as_bytes());
+    /// let items = dec.items().collect::<Result<Vec<_>, _>>().unwrap();
+    ///
+    /// assert_eq!(items, vec![
+    ///     Cbor::Array(vec![
+    ///         Cbor::Unicode("a".to_string()),
+    ///         Cbor::Unsigned(CborUnsigned::UInt8(1)),
+    ///     ]),
+    ///     Cbor::Array(vec![
+    ///         Cbor::Unicode("b".to_string()),
+    ///         Cbor::Unsigned(CborUnsigned::UInt8(2)),
+    ///     ]),
+    ///     Cbor::Array(vec![
+    ///         Cbor::Unicode("c".to_string()),
+    ///         Cbor::Unsigned(CborUnsigned::UInt8(3)),
+    ///     ]),
+    /// ]);
+    /// ```
+    pub fn items(&mut self) -> Items<R> {
+        Items { dec: self }
     }
 
     fn read_data_item(&mut self, first: Option<u8>) -> CborResult<Cbor> {
@@ -231,6 +267,66 @@ impl<R: IoReader> Decoder<R> {
     }
 }
 
+impl Decoder<MemReader> {
+    /// Create a new CBOR decoder that reads from the buffer given.
+    ///
+    /// The buffer is usually given as either a `Vec<u8>` or a `&[u8]`.
+    pub fn from_bytes<'a, T>(bytes: T) -> Decoder<MemReader>
+            where T: IntoCow<'a, Vec<u8>, [u8]> {
+        Decoder::from_reader(MemReader::new(bytes.into_cow().into_owned()))
+    }
+}
+
+impl<R: IoReader> Decoder<R> {
+    fn errat(&self, err: ReadError) -> CborError {
+        CborError::AtOffset { kind: err, offset: self.rdr.last_offset }
+    }
+
+    fn errstr(&self, s: String) -> CborError {
+        self.errat(ReadError::Other(s))
+    }
+}
+
+/// An iterator over items decoded from CBOR into Rust values.
+///
+/// `D` represents the type of the Rust value being decoded into, `R`
+/// represents the underlying reader and `'a` is the lifetime of the decoder.
+pub struct DecodedItems<'a, R: 'a, D> {
+    it: Items<'a, R>,
+}
+
+impl<'a, R: IoReader, D: Decodable> Iterator for DecodedItems<'a, R, D> {
+    type Item = CborResult<D>;
+
+    fn next(&mut self) -> Option<CborResult<D>> {
+        self.it.next().map(|result| {
+            result.and_then(|v| Decodable::decode(&mut CborDecoder::new(v)))
+        })
+    }
+}
+
+/// An iterator over CBOR items in terms of the abstract syntax.
+///
+/// `R` represents the underlying reader and `'a` is the lifetime of the
+/// decoder.
+pub struct Items<'a, R: 'a> {
+    dec: &'a mut Decoder<R>,
+}
+
+impl<'a, R: IoReader> Iterator for Items<'a, R> {
+    type Item = CborResult<Cbor>;
+
+    fn next(&mut self) -> Option<CborResult<Cbor>> {
+        match self.dec.read_data_item(None) {
+            Err(ref err) if err.is_eof() => None,
+            Err(err) => Some(Err(err)),
+            Ok(v) => Some(Ok(v)),
+        }
+    }
+}
+
+/// A very light layer over a basic reader that keeps track of offset
+/// information at the byte level.
 struct CborReader<R> {
     rdr: R,
     // used for error reporting
