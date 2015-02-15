@@ -124,7 +124,8 @@ between Rust values and a binary representation. Here is a brief comparison
 crucial details):
 
 * CBOR is an IETF standard with implementations in
-  [many languages](http://cbor.io/impls.html).
+  [many languages](http://cbor.io/impls.html). This means you can use CBOR
+  to easily communicate with programs written in other programming languages.
 * `cbor` tags every data item encoded, including every number. `bincode` does
   not, which means the compactness of the resulting binary data depends on your
   data. For example, using `cbor`, encoding a `Vec<u64>` will encode every
