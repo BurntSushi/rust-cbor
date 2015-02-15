@@ -65,8 +65,8 @@ There are [more examples in the docs](http://burntsushi.net/rustdoc/cbor/).
 ### Status of implementation
 
 The big thing missing at the moment is indefinite length encoding. It's easy
-enough to add, but I'm still trying to think of the best way to expose it in
-the API.
+enough to implement, but I'm still trying to think of the best way to expose it
+in the API.
 
 Otherwise, all core CBOR features are implemented. There is support for tags,
 but none of the tags in the IANA registry are implemented. It isn't clear to me
