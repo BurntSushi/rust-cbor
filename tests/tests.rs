@@ -77,13 +77,13 @@ round_trip_num!(roundtrip_prop_i8, i8);
 #[test]
 fn roundtrip_prop_f32() {
     fn prop(n: f32) -> bool { round_trip(n) }
-    qc_sized(prop as fn(f32) -> bool, ::std::f32::MAX_VALUE as u64 - 1)
+    qc_sized(prop as fn(f32) -> bool, ::std::f32::MAX as u64 - 1)
 }
 
 #[test]
 fn roundtrip_prop_f64() {
     fn prop(n: f64) -> bool { round_trip(n) }
-    qc_sized(prop as fn(f64) -> bool, ::std::f64::MAX_VALUE as u64 - 1)
+    qc_sized(prop as fn(f64) -> bool, ::std::f64::MAX as u64 - 1)
 }
 
 macro_rules! round_trip_any {
