@@ -1,10 +1,9 @@
 use std::borrow::IntoCow;
 use std::collections::hash_map::HashMap;
-use std::old_io::{IoResult, MemReader};
-use std::old_io::Reader as IoReader;
+use std::io::{self, Read};
 use std::mem::transmute;
 
-use byteorder::{ReaderBytesExt, BigEndian};
+use byteorder::{ReadBytesExt, BigEndian};
 use rustc_serialize::Decodable;
 
 use rustc_decoder::CborDecoder;
@@ -18,7 +17,7 @@ pub struct Decoder<R> {
     rdr: CborReader<R>,
 }
 
-impl<R: IoReader> Decoder<R> {
+impl<R: io::Read> Decoder<R> {
     /// Create a new CBOR decoder from the underlying reader.
     pub fn from_reader(rdr: R) -> Decoder<R> {
         Decoder { rdr: CborReader::new(rdr) }
@@ -95,7 +94,7 @@ impl<R: IoReader> Decoder<R> {
     fn read_data_item(&mut self, first: Option<u8>) -> CborResult<Cbor> {
         let first = match first {
             Some(first) => first,
-            None => try!(self.rdr.read_byte()),
+            None => try!(self.rdr.read_u8()),
         };
         match (first & 0b111_00000) >> 5 {
             0 => self.read_uint(first).map(Cbor::Unsigned),
@@ -108,7 +107,7 @@ impl<R: IoReader> Decoder<R> {
             7 => match first & 0b000_11111 {
                 v @ 0...23 => self.read_simple_value(v),
                 24 => {
-                    let b = try!(self.rdr.read_byte());
+                    let b = try!(self.rdr.read_u8());
                     self.read_simple_value(b)
                 }
                 25...27 => self.read_float(first).map(Cbor::Float),
@@ -220,7 +219,7 @@ impl<R: IoReader> Decoder<R> {
     fn read_uint(&mut self, first: u8) -> CborResult<CborUnsigned> {
         Ok(match first & 0b000_11111 {
             n @ 0...23 => CborUnsigned::UInt8(n),
-            24 => CborUnsigned::UInt8(try!(self.rdr.read_byte())),
+            24 => CborUnsigned::UInt8(try!(self.rdr.read_u8())),
             25 => CborUnsigned::UInt16(try!(self.rdr.read_u16::<BigEndian>())),
             26 => CborUnsigned::UInt32(try!(self.rdr.read_u32::<BigEndian>())),
             27 => CborUnsigned::UInt64(try!(self.rdr.read_u64::<BigEndian>())),
@@ -233,7 +232,7 @@ impl<R: IoReader> Decoder<R> {
         Ok(match first & 0b000_11111 {
             n @ 0...23 => CborSigned::Int8(-1 - (n as i8)),
             24 => {
-                let n = try!(self.rdr.read_byte());
+                let n = try!(self.rdr.read_u8());
                 if n > ::std::i8::MAX as u8 {
                     CborSigned::Int16(-1 - (n as i16))
                 } else {
@@ -270,17 +269,17 @@ impl<R: IoReader> Decoder<R> {
     }
 }
 
-impl Decoder<MemReader> {
+impl Decoder<io::Cursor<Vec<u8>>> {
     /// Create a new CBOR decoder that reads from the buffer given.
     ///
     /// The buffer is usually given as either a `Vec<u8>` or a `&[u8]`.
-    pub fn from_bytes<'a, T>(bytes: T) -> Decoder<MemReader>
+    pub fn from_bytes<'a, T>(bytes: T) -> Decoder<io::Cursor<Vec<u8>>>
             where T: IntoCow<'a, [u8]> {
-        Decoder::from_reader(MemReader::new(bytes.into_cow().into_owned()))
+        Decoder::from_reader(io::Cursor::new(bytes.into_cow().into_owned()))
     }
 }
 
-impl<R: IoReader> Decoder<R> {
+impl<R: io::Read> Decoder<R> {
     fn errat(&self, err: ReadError) -> CborError {
         CborError::AtOffset { kind: err, offset: self.rdr.last_offset }
     }
@@ -299,7 +298,7 @@ pub struct DecodedItems<'a, R: 'a, D> {
     _phantom: ::std::marker::PhantomData<D>,
 }
 
-impl<'a, R: IoReader, D: Decodable> Iterator for DecodedItems<'a, R, D> {
+impl<'a, R: io::Read, D: Decodable> Iterator for DecodedItems<'a, R, D> {
     type Item = CborResult<D>;
 
     fn next(&mut self) -> Option<CborResult<D>> {
@@ -317,7 +316,7 @@ pub struct Items<'a, R: 'a> {
     dec: &'a mut Decoder<R>,
 }
 
-impl<'a, R: IoReader> Iterator for Items<'a, R> {
+impl<'a, R: io::Read> Iterator for Items<'a, R> {
     type Item = CborResult<Cbor>;
 
     fn next(&mut self) -> Option<CborResult<Cbor>> {
@@ -338,8 +337,8 @@ struct CborReader<R> {
     bytes_read: usize,
 }
 
-impl<R: IoReader> IoReader for CborReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+impl<R: io::Read> io::Read for CborReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let n = try!(self.rdr.read(buf));
         self.last_offset = self.bytes_read;
         self.bytes_read += n;
@@ -347,15 +346,18 @@ impl<R: IoReader> IoReader for CborReader<R> {
     }
 }
 
-impl<R: IoReader> CborReader<R> {
+impl<R: io::Read> CborReader<R> {
     fn new(rdr: R) -> CborReader<R> {
         CborReader { rdr: rdr, last_offset: 0, bytes_read: 0 }
     }
 
-    fn read_full(&mut self, buf: &mut [u8]) -> IoResult<()> {
-        let mut n = 0usize;
-        while n < buf.len() {
-            n += try!(self.read(&mut buf[n..]));
+    fn read_full(&mut self, buf: &mut [u8]) -> CborResult<()> {
+        let mut nread = 0usize;
+        while nread < buf.len() {
+            match try!(self.read(&mut buf[nread..])) {
+                0 => return Err(CborError::UnexpectedEOF),
+                n => nread += n,
+            }
         }
         Ok(())
     }
