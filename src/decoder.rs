@@ -47,7 +47,10 @@ impl<R: IoReader> Decoder<R> {
     /// assert_eq!(items, data);
     /// ```
     pub fn decode<D: Decodable>(&mut self) -> DecodedItems<R, D> {
-        DecodedItems { it: self.items() }
+        DecodedItems {
+            it: self.items(),
+            _phantom: ::std::marker::PhantomData,
+        }
     }
 
     /// Read a sequence of top-level CBOR data items.
@@ -272,7 +275,7 @@ impl Decoder<MemReader> {
     ///
     /// The buffer is usually given as either a `Vec<u8>` or a `&[u8]`.
     pub fn from_bytes<'a, T>(bytes: T) -> Decoder<MemReader>
-            where T: IntoCow<'a, Vec<u8>, [u8]> {
+            where T: IntoCow<'a, [u8]> {
         Decoder::from_reader(MemReader::new(bytes.into_cow().into_owned()))
     }
 }
@@ -293,6 +296,7 @@ impl<R: IoReader> Decoder<R> {
 /// represents the underlying reader and `'a` is the lifetime of the decoder.
 pub struct DecodedItems<'a, R: 'a, D> {
     it: Items<'a, R>,
+    _phantom: ::std::marker::PhantomData<D>,
 }
 
 impl<'a, R: IoReader, D: Decodable> Iterator for DecodedItems<'a, R, D> {
@@ -349,7 +353,7 @@ impl<R: IoReader> CborReader<R> {
     }
 
     fn read_full(&mut self, buf: &mut [u8]) -> IoResult<()> {
-        let mut n = 0us;
+        let mut n = 0usize;
         while n < buf.len() {
             n += try!(self.read(&mut buf[n..]));
         }
