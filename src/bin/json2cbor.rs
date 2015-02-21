@@ -1,19 +1,16 @@
-#![feature(exit_status, old_io)]
+#![feature(exit_status, io)]
 
 extern crate cbor;
 extern crate "rustc-serialize" as rustc_serialize;
 
 use std::env::set_exit_status;
-use std::old_io as io;
+use std::io::{self, Write};
 
 use cbor::{Encoder, ToCbor};
 use rustc_serialize::json::Json;
 
 macro_rules! err {
-    ($($arg:tt)*) => ({
-        let _ = io::stderr().write_str(&*format!($($arg)*));
-        let _ = io::stderr().write_str("\n");
-    });
+    ($($arg:tt)*) => ({ let _ = writeln!(&mut io::stderr(), $($arg)*); });
 }
 
 fn main() {

@@ -1,6 +1,3 @@
-#![allow(unused_features)]
-#![feature(old_io)]
-
 extern crate cbor;
 extern crate quickcheck;
 extern crate rand;
@@ -13,15 +10,6 @@ use rustc_serialize::{Decodable, Encodable};
 use quickcheck::{QuickCheck, StdGen, Testable};
 
 use cbor::{Encoder, Decoder, Cbor, CborBytes, CborTagEncode};
-
-// A trivial logging macro. No reason to pull in `log`, which has become
-// difficult to use in tests.
-macro_rules! lg {
-    ($($arg:tt)*) => ({
-        let _ = ::std::old_io::stderr().write_str(&*format!($($arg)*));
-        let _ = ::std::old_io::stderr().write_str("\n");
-    });
-}
 
 fn qc_sized<A: Testable>(f: A, size: u64) {
     QuickCheck::new()

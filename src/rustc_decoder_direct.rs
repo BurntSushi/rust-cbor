@@ -1,8 +1,8 @@
 use std::borrow::{IntoCow, ToOwned};
 use std::char;
-use std::old_io as io;
+use std::io::{self, Read};
 
-use byteorder::{ReaderBytesExt, BigEndian};
+use byteorder::{ReadBytesExt, BigEndian};
 use rustc_serialize::Decoder as RustcDecoder;
 
 use {Type, CborResult, CborError, ReadError};
@@ -21,25 +21,25 @@ pub struct CborDecoder<R> {
     rdr: CborReader<R>,
 }
 
-impl CborDecoder<io::MemReader> {
+impl CborDecoder<io::Cursor<Vec<u8>>> {
     /// Create a new CBOR decoder that reads from the buffer given.
     ///
     /// The buffer is usually given as either a `Vec<u8>` or a `&[u8]`.
-    pub fn from_bytes<'a, T>(bytes: T) -> CborDecoder<io::MemReader>
+    pub fn from_bytes<'a, T>(bytes: T) -> CborDecoder<io::Cursor<Vec<u8>>>
             where T: IntoCow<'a, [u8]> {
-        let rdr = io::MemReader::new(bytes.into_cow().into_owned());
+        let rdr = io::Cursor::new(bytes.into_cow().into_owned());
         CborDecoder { rdr: CborReader::new(rdr) }
     }
 }
 
-impl<R: io::Reader> CborDecoder<io::BufferedReader<R>> {
+impl<R: io::Read> CborDecoder<io::BufReader<R>> {
     /// Create a new CBOR decoder that reads from the reader given.
-    pub fn from_reader(rdr: R) -> CborDecoder<io::BufferedReader<R>> {
-        CborDecoder { rdr: CborReader::new(io::BufferedReader::new(rdr)) }
+    pub fn from_reader(rdr: R) -> CborDecoder<io::BufReader<R>> {
+        CborDecoder { rdr: CborReader::new(io::BufReader::new(rdr)) }
     }
 }
 
-impl<R: io::Reader> CborDecoder<R> {
+impl<R: io::Read> CborDecoder<R> {
     fn err(&self, err: ReadError) -> CborError {
         CborError::Decode(err)
     }
@@ -59,7 +59,7 @@ impl<R: io::Reader> CborDecoder<R> {
 
     fn read_type(&mut self, expected: Type)
                 -> CborResult<u8> {
-        let b = try!(self.rdr.read_byte());
+        let b = try!(self.rdr.read_u8());
         if (b & 0b111_00000) >> 5 == expected.major() {
             Ok(b)
         } else {
@@ -71,7 +71,7 @@ impl<R: io::Reader> CborDecoder<R> {
                  -> CborResult<f64> {
         let b = match first {
             Some(b) => b,
-            None => try!(self.rdr.read_byte()),
+            None => try!(self.rdr.read_u8()),
         };
         let (n, size) = match ((b & 0b111_00000) >> 5, b & 0b000_11111) {
             (0, n) => {
@@ -102,14 +102,14 @@ impl<R: io::Reader> CborDecoder<R> {
                 -> CborResult<i64> {
         let b = match first {
             Some(b) => b,
-            None => try!(self.rdr.read_byte()),
+            None => try!(self.rdr.read_u8()),
         };
         let n = match ((b & 0b111_00000) >> 5, b & 0b000_11111) {
             (0, n) => {
                 return self.read_uint(Some(n), expect_size).map(|n| n as i64);
             }
             (1, n @ 0...23) => n as i64,
-            (1, 24) => try!(self.rdr.read_byte()) as i64,
+            (1, 24) => try!(self.rdr.read_u8()) as i64,
             (1, 25) => try!(self.rdr.read_i16::<BigEndian>()) as i64,
             (1, 26) => try!(self.rdr.read_i32::<BigEndian>()) as i64,
             (1, 27) => try!(self.rdr.read_i64::<BigEndian>()),
@@ -142,11 +142,11 @@ impl<R: io::Reader> CborDecoder<R> {
                 -> CborResult<u64> {
         let b = match first {
             Some(b) => b,
-            None => try!(self.rdr.read_byte()),
+            None => try!(self.rdr.read_u8()),
         };
         let (n, size) = match ((b & 0b111_00000) >> 5, b & 0b000_11111) {
             (0, n @ 0...23) => (n as u64, 8),
-            (0, 24) => (try!(self.rdr.read_byte()) as u64, 8),
+            (0, 24) => (try!(self.rdr.read_u8()) as u64, 8),
             (0, 25) => (try!(self.rdr.read_u16::<BigEndian>()) as u64, 16),
             (0, 26) => (try!(self.rdr.read_u32::<BigEndian>()) as u64, 32),
             (0, 27) => (try!(self.rdr.read_u64::<BigEndian>()), 64),
@@ -162,7 +162,7 @@ impl<R: io::Reader> CborDecoder<R> {
     }
 }
 
-impl<R: io::Reader> RustcDecoder for CborDecoder<R> {
+impl<R: io::Read> RustcDecoder for CborDecoder<R> {
     type Error = CborError;
 
     fn error(&mut self, err: &str) -> CborError {
@@ -170,7 +170,7 @@ impl<R: io::Reader> RustcDecoder for CborDecoder<R> {
     }
 
     fn read_nil(&mut self) -> CborResult<()> {
-        let b = try!(self.rdr.read_byte());
+        let b = try!(self.rdr.read_u8());
         if (b & 0b111_00000) >> 5 == 7 && b & 0b000_11111 == 22 {
             Ok(())
         } else {
@@ -221,7 +221,7 @@ impl<R: io::Reader> RustcDecoder for CborDecoder<R> {
     }
 
     fn read_bool(&mut self) -> CborResult<bool> {
-        let b = try!(self.rdr.read_byte());
+        let b = try!(self.rdr.read_u8());
         match ((b & 0b111_00000) >> 5, b & 0b000_11111) {
             (7, 20) => Ok(false),
             (7, 21) => Ok(true),
@@ -363,7 +363,7 @@ impl<R: io::Reader> RustcDecoder for CborDecoder<R> {
 
     fn read_option<T, F>(&mut self, mut f: F) -> CborResult<T>
             where F: FnMut(&mut CborDecoder<R>, bool) -> CborResult<T> {
-        let b = try!(self.rdr.read_byte());
+        let b = try!(self.rdr.read_u8());
         if (b & 0b111_00000) >> 5 == 7 && b & 0b000_11111 == 22 {
             f(self, false)
         } else {
@@ -413,8 +413,8 @@ struct CborReader<R> {
     bytes_read: usize,
 }
 
-impl<R: io::Reader> io::Reader for CborReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::IoResult<usize> {
+impl<R: io::Read> io::Read for CborReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if !self.buf.is_empty() {
             if self.buf.len() <= buf.len() {
                 let nread = self.buf.len();
@@ -442,7 +442,7 @@ impl<R: io::Reader> io::Reader for CborReader<R> {
     }
 }
 
-impl<R: io::Reader> CborReader<R> {
+impl<R: io::Read> CborReader<R> {
     fn new(rdr: R) -> CborReader<R> {
         CborReader {
             rdr: rdr,
@@ -452,7 +452,7 @@ impl<R: io::Reader> CborReader<R> {
         }
     }
 
-    fn read_full(&mut self, buf: &mut [u8]) -> io::IoResult<()> {
+    fn read_full(&mut self, buf: &mut [u8]) -> io::Result<()> {
         let mut n = 0usize;
         while n < buf.len() {
             n += try!(self.read(&mut buf[n..]));

@@ -1,6 +1,5 @@
 use std::iter::IntoIterator;
-use std::old_io::BufferedWriter;
-use std::old_io::Writer as IoWriter;
+use std::io;
 use std::u8;
 use std::u16;
 use std::u32;
@@ -22,7 +21,7 @@ pub struct Encoder<W> {
     tag: bool,
 }
 
-impl<W: IoWriter> Encoder<W> {
+impl<W: io::Write> Encoder<W> {
     fn write_num(&mut self, major: u8, n: u64) -> CborResult<()> {
         let major = major << 5;
         if n <= 23 {
@@ -57,10 +56,10 @@ impl<W: IoWriter> Encoder<W> {
     }
 }
 
-impl<W: IoWriter> Encoder<W> {
+impl<W: io::Write> Encoder<W> {
     /// Encode CBOR to an arbitrary writer.
-    pub fn from_writer(wtr: W) -> Encoder<BufferedWriter<W>> {
-        Encoder::from_writer_raw(BufferedWriter::new(wtr))
+    pub fn from_writer(wtr: W) -> Encoder<io::BufWriter<W>> {
+        Encoder::from_writer_raw(io::BufWriter::new(wtr))
     }
 
     fn from_writer_raw(wtr: W) -> Encoder<W> {
@@ -136,7 +135,7 @@ macro_rules! no_string_key {
     );
 }
 
-impl<W: IoWriter> RustcEncoder for Encoder<W> {
+impl<W: io::Write> RustcEncoder for Encoder<W> {
     type Error = CborError;
 
     fn emit_nil(&mut self) -> CborResult<()> {

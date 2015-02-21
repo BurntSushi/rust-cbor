@@ -120,7 +120,7 @@ so you can convert JSON to CBOR in a similar manner as above.
 #![doc(html_root_url = "http://burntsushi.net/rustdoc/cbor")]
 
 #![deny(missing_docs)]
-#![feature(collections, old_io)]
+#![feature(collections, io)]
 
 extern crate byteorder;
 extern crate "rustc-serialize" as rustc_serialize;
@@ -128,7 +128,8 @@ extern crate "rustc-serialize" as rustc_serialize;
 use std::collections::HashMap;
 use std::error::FromError;
 use std::fmt;
-use std::old_io::{IoError, IoErrorKind};
+use std::io;
+
 use rustc_serialize::Decoder as RustcDecoder;
 use rustc_serialize::Encoder as RustcEncoder;
 use rustc_serialize::{Decodable, Encodable};
@@ -635,7 +636,7 @@ type ReadResult<T> = Result<T, ReadError>;
 #[derive(Clone, Debug)]
 pub enum CborError {
     /// An error as a result of an  underlying IO operation.
-    Io(IoError),
+    Io(io::Error),
     /// An error from the type based decoder.
     Decode(ReadError), // decoder loses byte offset information :-(
     /// An error from the type based encoder.
@@ -650,12 +651,16 @@ pub enum CborError {
         /// The byte offset at which the error occurred.
         offset: usize,
     },
+    /// EOF is found but more bytes were expected to decode the next data item.
+    ///
+    /// EOF is triggered when the underlying reader returns `0` bytes.
+    UnexpectedEOF,
 }
 
 impl CborError {
     fn is_eof(&self) -> bool {
         match *self {
-            CborError::Io(IoError {kind: IoErrorKind::EndOfFile, ..}) => true,
+            CborError::UnexpectedEOF => true,
             _ => false,
         }
     }
@@ -706,8 +711,17 @@ pub enum WriteError {
     },
 }
 
-impl FromError<IoError> for CborError {
-    fn from_error(err: IoError) -> CborError { CborError::Io(err) }
+impl FromError<io::Error> for CborError {
+    fn from_error(err: io::Error) -> CborError { CborError::Io(err) }
+}
+
+impl FromError<byteorder::Error> for CborError {
+    fn from_error(err: byteorder::Error) -> CborError {
+        match err {
+            byteorder::Error::UnexpectedEOF => CborError::UnexpectedEOF,
+            byteorder::Error::Io(err) => FromError::from_error(err),
+        }
+    }
 }
 
 impl ReadError {
@@ -741,6 +755,7 @@ impl fmt::Display for CborError {
             CborError::AtOffset { ref kind, offset } => {
                 write!(f, "Error at byte offset {:?}: {}", offset, kind)
             }
+            CborError::UnexpectedEOF => write!(f, "Unexpected EOF."),
         }
     }
 }

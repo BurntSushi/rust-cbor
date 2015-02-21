@@ -40,7 +40,7 @@ bench = true
 
 [dependencies]
 byteorder = "*"
-rustc-serialize = "0.2.0"
+rustc-serialize = "*"
 
 [dev-dependencies]
 quickcheck = "*"
