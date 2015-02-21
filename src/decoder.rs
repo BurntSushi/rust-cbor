@@ -1,6 +1,6 @@
 use std::borrow::IntoCow;
 use std::collections::hash_map::HashMap;
-use std::old_io::{IoResult, MemReader};
+use std::old_io::{BufferedReader, IoResult, MemReader};
 use std::old_io::Reader as IoReader;
 use std::mem::transmute;
 
@@ -18,12 +18,14 @@ pub struct Decoder<R> {
     rdr: CborReader<R>,
 }
 
-impl<R: IoReader> Decoder<R> {
+impl<R: IoReader> Decoder<BufferedReader<R>> {
     /// Create a new CBOR decoder from the underlying reader.
-    pub fn from_reader(rdr: R) -> Decoder<R> {
-        Decoder { rdr: CborReader::new(rdr) }
+    pub fn from_reader(rdr: R) -> Decoder<BufferedReader<R>> {
+        Decoder { rdr: CborReader::new(BufferedReader::new(rdr)) }
     }
+}
 
+impl<R: IoReader> Decoder<R> {
     /// Decode a sequence of top-level CBOR data items into Rust values.
     ///
     /// # Example
@@ -276,7 +278,8 @@ impl Decoder<MemReader> {
     /// The buffer is usually given as either a `Vec<u8>` or a `&[u8]`.
     pub fn from_bytes<'a, T>(bytes: T) -> Decoder<MemReader>
             where T: IntoCow<'a, [u8]> {
-        Decoder::from_reader(MemReader::new(bytes.into_cow().into_owned()))
+        let rdr = MemReader::new(bytes.into_cow().into_owned());
+        Decoder { rdr: CborReader::new(rdr) }
     }
 }
 
@@ -349,7 +352,11 @@ impl<R: IoReader> IoReader for CborReader<R> {
 
 impl<R: IoReader> CborReader<R> {
     fn new(rdr: R) -> CborReader<R> {
-        CborReader { rdr: rdr, last_offset: 0, bytes_read: 0 }
+        CborReader {
+            rdr: rdr,
+            last_offset: 0,
+            bytes_read: 0,
+        }
     }
 
     fn read_full(&mut self, buf: &mut [u8]) -> IoResult<()> {
