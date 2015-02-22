@@ -5,8 +5,8 @@ extern crate "rustc-serialize" as rustc_serialize;
 extern crate test;
 
 use std::iter::repeat;
-use cbor::{Decoder, Encoder};
-use rustc_serialize::Encodable;
+use cbor::{Decoder, DirectDecoder, Encoder};
+use rustc_serialize::{Decodable, Encodable};
 use rustc_serialize::json::{self, Json, ToJson};
 
 fn cbor_encode<T: Encodable>(v: T) -> Vec<u8> {
@@ -157,6 +157,22 @@ fn decode_small_cbor(b: &mut test::Bencher) {
 }
 
 #[bench]
+fn decode_small_direct_cbor(b: &mut test::Bencher) {
+    let data = ("hello, world".to_string(),
+                true, (), vec![1, 1000, 100_000, 10_000_000], 3.14);
+    let mut enc = Encoder::from_memory();
+    enc.encode(&[data]).unwrap();
+    let bytes = enc.as_bytes();
+
+    b.bytes = bytes.len() as u64;
+    b.iter(|| {
+        let mut dec = DirectDecoder::from_bytes(bytes.to_vec());
+        let _: (String, bool, (), Vec<u64>, f64) =
+            Decodable::decode(&mut dec).unwrap();
+    });
+}
+
+#[bench]
 fn decode_small_json(b: &mut test::Bencher) {
     let data = ("hello, world".to_string(),
                 true, (), vec![1, 1000, 100_000, 10_000_000], 3.14);
@@ -183,6 +199,23 @@ fn decode_medium_cbor(b: &mut test::Bencher) {
         let mut dec = Decoder::from_bytes(bytes.to_vec());
         let _: Vec<(String, bool, (), Vec<u64>, f64)> =
             dec.decode().next().unwrap().unwrap();
+    });
+}
+
+#[bench]
+fn decode_medium_direct_cbor(b: &mut test::Bencher) {
+    let data = ("hello, world".to_string(),
+                true, (), vec![1, 1000, 100_000, 10_000_000], 3.14);
+    let items = repeat(data).take(10_000).collect::<Vec<_>>();
+    let mut enc = Encoder::from_memory();
+    enc.encode(&[items]).unwrap();
+    let bytes = enc.as_bytes();
+
+    b.bytes = bytes.len() as u64;
+    b.iter(|| {
+        let mut dec = DirectDecoder::from_bytes(bytes.to_vec());
+        let _: Vec<(String, bool, (), Vec<u64>, f64)> =
+            Decodable::decode(&mut dec).unwrap();
     });
 }
 

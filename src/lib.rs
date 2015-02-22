@@ -119,8 +119,10 @@ so you can convert JSON to CBOR in a similar manner as above.
 #![crate_name = "cbor"]
 #![doc(html_root_url = "http://burntsushi.net/rustdoc/cbor")]
 
-#![deny(missing_docs)]
-#![feature(old_io)]
+#![allow(dead_code, unused_imports, unused_mut, unused_variables)]
+
+// #![deny(missing_docs)]
+#![feature(collections, old_io)]
 
 extern crate byteorder;
 extern crate "rustc-serialize" as rustc_serialize;
@@ -136,6 +138,7 @@ use rustc_serialize::{Decodable, Encodable};
 pub use decoder::Decoder;
 pub use encoder::Encoder;
 pub use json::ToCbor;
+pub use rustc_decoder_direct::CborDecoder as DirectDecoder;
 
 // A trivial logging macro. No reason to pull in `log`, which has become
 // difficult to use in tests.
@@ -166,6 +169,61 @@ pub enum Type {
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self)
+    }
+}
+
+impl Type {
+    fn from_desc(b: u8) -> ReadResult<Type> {
+        Ok(match ((b & 0b111_00000) >> 5, b & 0b000_11111) {
+            (0, 0...23) => Type::UInt8,
+            (0, 24) => Type::UInt8,
+            (0, 25) => Type::UInt16,
+            (0, 26) => Type::UInt32,
+            (0, 27) => Type::UInt64,
+            (1, 0...23) => Type::Int8,
+            (1, 24) => Type::Int8,
+            (1, 25) => Type::Int16,
+            (1, 26) => Type::Int32,
+            (1, 27) => Type::Int64,
+            (2, _) => Type::Bytes,
+            (3, _) => Type::Unicode,
+            (4, _) => Type::Array,
+            (5, _) => Type::Map,
+            (6, _) => Type::Tag,
+            (7, v @ 0...19) => return Err(ReadError::Unassigned {
+                major: 7, add: v,
+            }),
+            (7, 20...21) => Type::Bool,
+            (7, 22) => Type::Null,
+            (7, 23) => Type::Undefined,
+            (7, 25) => Type::Float16,
+            (7, 26) => Type::Float32,
+            (7, 27) => Type::Float64,
+            (7, v @ 28...30) => return Err(ReadError::Unassigned {
+                major: 7, add: v,
+            }),
+            (7, 31) => Type::Break,
+            (x, y) => return Err(ReadError::Unassigned {
+                major: x, add: y,
+            }),
+        })
+    }
+
+    fn major(self) -> u8 {
+        match self {
+            Type::UInt | Type::UInt8 | Type::UInt16
+            | Type::UInt32 | Type::UInt64 => 0,
+            Type::Int | Type::Int8 | Type::Int16
+            | Type::Int32 | Type::Int64 => 1,
+            Type::Bytes => 2,
+            Type::Unicode => 3,
+            Type::Array => 4,
+            Type::Map => 5,
+            Type::Tag => 6,
+            Type::Float | Type::Float16 | Type::Float32 | Type::Float64 => 7,
+            Type::Null | Type::Undefined | Type::Bool | Type::Break => 7,
+            Type::Any => unreachable!(),
+        }
     }
 }
 
@@ -662,6 +720,14 @@ impl ReadError {
     fn ty_mismatch(expected: Type, got: Type) -> ReadError {
         ReadError::TypeMismatch { expected: expected, got: got }
     }
+
+    fn miss(expected: Type, got: u8) -> ReadError {
+        let ty = match Type::from_desc(got) {
+            Ok(ty) => ty,
+            Err(err) => return err,
+        };
+        ReadError::TypeMismatch { expected: expected, got: ty }
+    }
 }
 
 impl fmt::Display for CborError {
@@ -722,3 +788,4 @@ mod decoder;
 mod encoder;
 mod json;
 mod rustc_decoder;
+mod rustc_decoder_direct;

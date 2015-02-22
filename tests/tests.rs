@@ -1,5 +1,5 @@
 #![allow(unused_features)]
-#![feature(io)]
+#![feature(old_io)]
 
 extern crate cbor;
 extern crate quickcheck;
@@ -166,4 +166,16 @@ fn roundtrip_prop_tag() {
         round_trip(MyTag { num: num, data: data })
     }
     QuickCheck::new().quickcheck(prop as fn(u64, Vec<i32>) -> bool)
+}
+
+#[test]
+fn scratch() {
+    use cbor::DirectDecoder;
+
+    let buf = encode("Hi");
+    lg!("BYTES: {:?}", buf);
+
+    let mut dec = DirectDecoder::from_bytes(buf);
+    let v: String = Decodable::decode(&mut dec).unwrap();
+    lg!("VALUE: {:?}", v);
 }
