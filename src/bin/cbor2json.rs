@@ -1,4 +1,4 @@
-#![feature(env, old_io)]
+#![feature(exit_status, old_io)]
 
 extern crate cbor;
 extern crate "rustc-serialize" as rustc_serialize;

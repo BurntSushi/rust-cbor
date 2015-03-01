@@ -167,15 +167,3 @@ fn roundtrip_prop_tag() {
     }
     QuickCheck::new().quickcheck(prop as fn(u64, Vec<i32>) -> bool)
 }
-
-#[test]
-fn scratch() {
-    use cbor::DirectDecoder;
-
-    let buf = encode("Hi");
-    lg!("BYTES: {:?}", buf);
-
-    let mut dec = DirectDecoder::from_bytes(buf);
-    let v: String = Decodable::decode(&mut dec).unwrap();
-    lg!("VALUE: {:?}", v);
-}

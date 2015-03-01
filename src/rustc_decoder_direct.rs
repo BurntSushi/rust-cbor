@@ -5,8 +5,18 @@ use std::old_io as io;
 use byteorder::{ReaderBytesExt, BigEndian};
 use rustc_serialize::Decoder as RustcDecoder;
 
-use {Cbor, CborUnsigned, Type, CborResult, CborError, ReadError};
+use {Type, CborResult, CborError, ReadError};
 
+/// Experimental and incomplete direct decoder.
+///
+/// A "direct" decoder is one that does not use an intermediate abstact syntax
+/// representation. Namely, the bytes are decoded directly into types. This
+/// *significantly* impacts performance. For example, it doesn't have to box
+/// and unbox every data item.
+///
+/// However, implementing a direct decoder is much harder in the existing
+/// serialization infrastructure. Currently, structs and enums are not
+/// implemented. (But `Vec`s, tuples, `Option`s and maps should work.)
 pub struct CborDecoder<R> {
     rdr: CborReader<R>,
 }
@@ -23,21 +33,22 @@ impl CborDecoder<io::MemReader> {
 }
 
 impl<R: io::Reader> CborDecoder<io::BufferedReader<R>> {
+    /// Create a new CBOR decoder that reads from the reader given.
     pub fn from_reader(rdr: R) -> CborDecoder<io::BufferedReader<R>> {
         CborDecoder { rdr: CborReader::new(io::BufferedReader::new(rdr)) }
     }
 }
 
 impl<R: io::Reader> CborDecoder<R> {
-    pub fn err(&self, err: ReadError) -> CborError {
+    fn err(&self, err: ReadError) -> CborError {
         CborError::Decode(err)
     }
 
-    pub fn errstr(&self, s: String) -> CborError {
+    fn errstr(&self, s: String) -> CborError {
         self.err(ReadError::Other(s))
     }
 
-    pub fn miss(&self, expected: Type, got: u8) -> CborError {
+    fn miss(&self, expected: Type, got: u8) -> CborError {
         self.err(ReadError::miss(expected, got))
     }
 
@@ -76,7 +87,7 @@ impl<R: io::Reader> CborDecoder<R> {
             }
             (7, 26) => (try!(self.rdr.read_f32::<BigEndian>()) as f64, 32),
             (7, 27) => (try!(self.rdr.read_f64::<BigEndian>()), 64),
-            (major, add) => return Err(self.miss(Type::Float, b)),
+            _ => return Err(self.miss(Type::Float, b)),
         };
         if size > expect_size {
             Err(self.errstr(format!(
@@ -102,7 +113,7 @@ impl<R: io::Reader> CborDecoder<R> {
             (1, 25) => try!(self.rdr.read_i16::<BigEndian>()) as i64,
             (1, 26) => try!(self.rdr.read_i32::<BigEndian>()) as i64,
             (1, 27) => try!(self.rdr.read_i64::<BigEndian>()),
-            (major, add) => return Err(self.miss(Type::Int, b)),
+            _ => return Err(self.miss(Type::Int, b)),
         };
 
         fn size(n: i64) -> u8 {
@@ -139,7 +150,7 @@ impl<R: io::Reader> CborDecoder<R> {
             (0, 25) => (try!(self.rdr.read_u16::<BigEndian>()) as u64, 16),
             (0, 26) => (try!(self.rdr.read_u32::<BigEndian>()) as u64, 32),
             (0, 27) => (try!(self.rdr.read_u64::<BigEndian>()), 64),
-            (major, add) => return Err(self.miss(Type::UInt, b)),
+            _ => return Err(self.miss(Type::UInt, b)),
         };
         if size > expect_size {
             Err(self.errstr(format!(
@@ -244,15 +255,15 @@ impl<R: io::Reader> RustcDecoder for CborDecoder<R> {
                .map_err(|err| self.errstr(err.utf8_error().to_string()))
     }
 
-    fn read_enum<T, F>(&mut self, _name: &str, f: F) -> CborResult<T>
+    fn read_enum<T, F>(&mut self, _name: &str, _f: F) -> CborResult<T>
             where F: FnOnce(&mut CborDecoder<R>) -> CborResult<T> {
         unreachable!()
     }
 
     fn read_enum_variant<T, F>(
         &mut self,
-        names: &[&str],
-        mut f: F,
+        _names: &[&str],
+        mut _f: F,
     ) -> CborResult<T>
     where F: FnMut(&mut CborDecoder<R>, usize) -> CborResult<T> {
         unreachable!()
@@ -261,7 +272,7 @@ impl<R: io::Reader> RustcDecoder for CborDecoder<R> {
     fn read_enum_variant_arg<T, F>(
         &mut self,
         _a_idx: usize,
-        f: F,
+        _f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder<R>) -> CborResult<T> {
         unreachable!()
@@ -269,8 +280,8 @@ impl<R: io::Reader> RustcDecoder for CborDecoder<R> {
 
     fn read_enum_struct_variant<T, F>(
         &mut self,
-        names: &[&str],
-        f: F,
+        _names: &[&str],
+        _f: F,
     ) -> CborResult<T>
     where F: FnMut(&mut CborDecoder<R>, usize) -> CborResult<T> {
         unreachable!()
@@ -279,8 +290,8 @@ impl<R: io::Reader> RustcDecoder for CborDecoder<R> {
     fn read_enum_struct_variant_field<T, F>(
         &mut self,
         _f_name: &str,
-        f_idx: usize,
-        f: F,
+        _f_idx: usize,
+        _f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder<R>) -> CborResult<T> {
         unreachable!()
@@ -290,7 +301,7 @@ impl<R: io::Reader> RustcDecoder for CborDecoder<R> {
         &mut self,
         _s_name: &str,
         _len: usize,
-        f: F,
+        _f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder<R>) -> CborResult<T> {
         unreachable!()
@@ -298,9 +309,9 @@ impl<R: io::Reader> RustcDecoder for CborDecoder<R> {
 
     fn read_struct_field<T, F>(
         &mut self,
-        f_name: &str,
+        _f_name: &str,
         _f_idx: usize,
-        f: F,
+        _f: F,
     ) -> CborResult<T>
     where F: FnOnce(&mut CborDecoder<R>) -> CborResult<T> {
         unreachable!()

@@ -119,9 +119,7 @@ so you can convert JSON to CBOR in a similar manner as above.
 #![crate_name = "cbor"]
 #![doc(html_root_url = "http://burntsushi.net/rustdoc/cbor")]
 
-#![allow(dead_code, unused_imports, unused_mut, unused_variables)]
-
-// #![deny(missing_docs)]
+#![deny(missing_docs)]
 #![feature(collections, old_io)]
 
 extern crate byteorder;
