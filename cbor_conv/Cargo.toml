@@ -1,8 +1,8 @@
 [package]
-name = "cbor"
+name = "cbor_conv"
 version = "0.2.1"  #:version
 authors = ["Andrew Gallant <jamslam@gmail.com>"]
-description = "CBOR (binary JSON) with type based decoding and encoding."
+description = "Command line tools for converting between CBOR and JSON."
 documentation = "http://burntsushi.net/rustdoc/cbor/"
 homepage = "https://github.com/BurntSushi/rust-cbor"
 repository = "https://github.com/BurntSushi/rust-cbor"
@@ -10,24 +10,20 @@ readme = "README.md"
 keywords = ["cbor", "json", "binary", "format", "encoding"]
 license = "Unlicense"
 
-[lib]
-name = "cbor"
-
-[[test]]
-name = "tests"
+[[bin]]
+path = "./src/cbor2json.rs"
+name = "cbor2json"
+doc = false
 test = false
 bench = false
 
-[[bench]]
-path = "./tests/bench.rs"
-name = "bench"
+[[bin]]
+path = "./src/json2cbor.rs"
+name = "json2cbor"
+doc = false
 test = false
-bench = true
+bench = false
 
 [dependencies]
-byteorder = "*"
+cbor = "*"
 rustc-serialize = "*"
-
-[dev-dependencies]
-quickcheck = "*"
-rand = "*"
