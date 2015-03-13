@@ -13,19 +13,19 @@ license = "Unlicense"
 [lib]
 name = "cbor"
 
-[[bin]]
-path = "./src/bin/cbor2json.rs"
-name = "cbor2json"
-doc = false
-test = false
-bench = false
+# [[bin]]
+# path = "./src/bin/cbor2json.rs"
+# name = "cbor2json"
+# doc = false
+# test = false
+# bench = false
 
-[[bin]]
-path = "./src/bin/json2cbor.rs"
-name = "json2cbor"
-doc = false
-test = false
-bench = false
+# [[bin]]
+# path = "./src/bin/json2cbor.rs"
+# name = "json2cbor"
+# doc = false
+# test = false
+# bench = false
 
 [[test]]
 name = "tests"
