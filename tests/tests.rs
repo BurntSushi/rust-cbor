@@ -120,7 +120,7 @@ fn roundtrip_struct() {
 }
 
 #[test]
-#[should_fail]
+#[should_panic]
 fn invalid_map_key() {
     let mut map = HashMap::new();
     map.insert(5, 5);
