@@ -399,7 +399,7 @@ impl<'a, T> CborTagEncode<'a, T> {
     /// application specific purpose, but it should probably be one that is
     /// currently unassigned in the IANA registry.
     ///
-    /// `data` actual data item to encode.
+    /// `tag` is the tag number and `data` is the actual data item to encode.
     pub fn new(tag: u64, data: &'a T) -> CborTagEncode<'a, T> {
         CborTagEncode {
             __cbor_tag_encode_tag: tag,
