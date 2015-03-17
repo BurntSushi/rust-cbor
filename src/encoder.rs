@@ -54,6 +54,10 @@ impl<W: io::Write> Encoder<W> {
             self.write_num(1, (-1 - n) as u64)
         }
     }
+
+    fn is_tag_field(&self, name: &str) -> bool {
+        self.tag && name.starts_with("__cbor_tag_encode")
+    }
 }
 
 impl<W: io::Write> Encoder<W> {
@@ -116,7 +120,24 @@ impl Encoder<Vec<u8>> {
         self.flush().unwrap();
         &self.buf
     }
+
+    /// Flush and retrieve the CBOR bytes that have been written without
+    /// copying.
+    pub fn into_bytes(mut self) -> Vec<u8> {
+        self.flush().unwrap();
+        self.buf
+    }
 }
+
+// /// Encodes a data item directly to CBOR bytes.
+// ///
+// /// This is useful when writing `Encodable` implementations with
+// /// `CborTagEncode`.
+// pub fn encode<E: Encodable>(v: E) -> CborResult<Vec<u8>> {
+    // let mut enc = Encoder::from_memory();
+    // try!(enc.encode(&[v]));
+    // Ok(enc.into_bytes())
+// }
 
 macro_rules! no_string_key {
     ($enc:expr) => (
@@ -320,7 +341,7 @@ impl<W: io::Write> RustcEncoder for Encoder<W> {
     ) -> CborResult<()>
     where F: FnOnce(&mut Encoder<W>) -> CborResult<()> {
         no_string_key!(self);
-        if !self.byte_string && !self.tag {
+        if !self.byte_string && !self.is_tag_field(f_name) {
             try!(self.emit_str(f_name));
         }
         f(self)

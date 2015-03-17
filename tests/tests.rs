@@ -144,14 +144,42 @@ fn roundtrip_prop_tag() {
     }
     impl Encodable for MyTag {
         fn encode<E: Encoder>(&self, e: &mut E) -> Result<(), E::Error> {
-            CborTagEncode {
-                tag: self.num,
-                data: &self.data,
-            }.encode(e)
+            CborTagEncode::new(self.num, &self.data).encode(e)
         }
     }
     fn prop(num: u64, data: Vec<i32>) -> bool {
         round_trip(MyTag { num: num, data: data })
     }
     QuickCheck::new().quickcheck(prop as fn(u64, Vec<i32>) -> bool)
+}
+
+#[test]
+fn roundtrip_tag_fancier_data() {
+    use rustc_serialize::{Decoder, Encoder};
+
+    #[derive(Debug, PartialEq, RustcDecodable, RustcEncodable)]
+    struct DataName(Vec<u8>);
+
+    #[derive(Debug, PartialEq)]
+    struct CustomData {
+        name: DataName,
+        value: Vec<u8>,
+    }
+
+    impl Decodable for CustomData {
+        fn decode<D: Decoder>(d: &mut D) -> Result<CustomData, D::Error> {
+            let _ = try!(d.read_u64());
+            let (name, value) = try!(Decodable::decode(d));
+            Ok(CustomData { name: name, value: value })
+        }
+    }
+    impl Encodable for CustomData {
+        fn encode<E: Encoder>(&self, e: &mut E) -> Result<(), E::Error> {
+            CborTagEncode::new(100_000, &(&self.name, &self.value)).encode(e)
+        }
+    }
+    assert!(round_trip(CustomData {
+        name: DataName(b"hello".to_vec()),
+        value: vec![1, 2, 3, 4, 5],
+    }));
 }

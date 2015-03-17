@@ -60,15 +60,12 @@ struct MyDataStructure {
 
 impl Encodable for MyDataStructure {
     fn encode<E: Encoder>(&self, e: &mut E) -> Result<(), E::Error> {
-        CborTagEncode {
-            // See a list of tags here:
-            // http://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
-            //
-            // It is OK to choose your own tag number, but it's probably
-            // best to choose one that is unassigned in the IANA registry.
-            tag: 100_000,
-            data: &self.data,
-        }.encode(e)
+        // See a list of tags here:
+        // http://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
+        //
+        // It is OK to choose your own tag number, but it's probably
+        // best to choose one that is unassigned in the IANA registry.
+        CborTagEncode::new(100_000, &self.data).encode(e)
     }
 }
 
@@ -143,8 +140,8 @@ pub use rustc_decoder_direct::CborDecoder as DirectDecoder;
 // difficult to use in tests.
 macro_rules! lg {
     ($($arg:tt)*) => ({
-        let _ = ::std::old_io::stderr().write_str(&*format!($($arg)*));
-        let _ = ::std::old_io::stderr().write_str("\n");
+        use std::io::{Write, stderr};
+        writeln!(&mut stderr(), $($arg)*).unwrap();
     });
 }
 
@@ -355,15 +352,12 @@ pub struct CborTag {
 ///
 /// impl Encodable for MyDataStructure {
 ///     fn encode<E: Encoder>(&self, e: &mut E) -> Result<(), E::Error> {
-///         CborTagEncode {
-///             // See a list of tags here:
-///             // http://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
-///             //
-///             // It is OK to choose your own tag number, but it's probably
-///             // best to choose one that is unassigned in the IANA registry.
-///             tag: 100_000,
-///             data: &self.data,
-///         }.encode(e)
+///         // See a list of tags here:
+///         // http://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
+///         //
+///         // It is OK to choose your own tag number, but it's probably
+///         // best to choose one that is unassigned in the IANA registry.
+///         CborTagEncode::new(100_000, &self.data).encode(e)
 ///     }
 /// }
 ///
@@ -389,10 +383,29 @@ pub struct CborTagEncode<'a, T: 'a> {
     /// Note that it is OK to choose your own tag number for your own
     /// application specific purpose, but it should probably be one that is
     /// currently unassigned in the IANA registry.
-    pub tag: u64,
+    __cbor_tag_encode_tag: u64,
 
     /// The actual data item to encode.
-    pub data: &'a T,
+    __cbor_tag_encode_data: &'a T,
+}
+
+impl<'a, T> CborTagEncode<'a, T> {
+    /// Create a new value that is encodable as a CBOR tag.
+    ///
+    /// You can see a list of currently assigned tag numbers here:
+    /// http://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
+    ///
+    /// Note that it is OK to choose your own tag number for your own
+    /// application specific purpose, but it should probably be one that is
+    /// currently unassigned in the IANA registry.
+    ///
+    /// `data` actual data item to encode.
+    pub fn new(tag: u64, data: &'a T) -> CborTagEncode<'a, T> {
+        CborTagEncode {
+            __cbor_tag_encode_tag: tag,
+            __cbor_tag_encode_data: data,
+        }
+    }
 }
 
 impl Cbor {
