@@ -115,9 +115,7 @@ so you can convert JSON to CBOR in a similar manner as above.
 */
 #![crate_name = "cbor"]
 #![doc(html_root_url = "http://burntsushi.net/rustdoc/cbor")]
-
 #![deny(missing_docs)]
-#![feature(collections, io)]
 
 extern crate byteorder;
 extern crate "rustc-serialize" as rustc_serialize;

@@ -418,9 +418,10 @@ impl<R: io::Read> io::Read for CborReader<R> {
         if !self.buf.is_empty() {
             if self.buf.len() <= buf.len() {
                 let nread = self.buf.len();
-                for (i, x) in self.buf.drain().enumerate() {
+                for (i, &x) in self.buf.iter().enumerate() {
                     buf[i] = x;
                 }
+                self.buf.truncate(0);
                 Ok(nread)
             } else {
                 for (i, x) in buf.iter_mut().enumerate() {
