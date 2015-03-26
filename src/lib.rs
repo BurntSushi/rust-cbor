@@ -463,7 +463,7 @@ impl CborUnsigned {
         Ok(match self {
             CborUnsigned::UInt8(v) => v as u32,
             CborUnsigned::UInt16(v) => v as u32,
-            CborUnsigned::UInt32(v) => v as u32,
+            CborUnsigned::UInt32(v) => v,
             _ => return Err(ReadError::ty_mismatch(Type::UInt32, self.typ())),
         })
     }
@@ -471,14 +471,14 @@ impl CborUnsigned {
     fn to_u16(self) -> ReadResult<u16> {
         Ok(match self {
             CborUnsigned::UInt8(v) => v as u16,
-            CborUnsigned::UInt16(v) => v as u16,
+            CborUnsigned::UInt16(v) => v,
             _ => return Err(ReadError::ty_mismatch(Type::UInt16, self.typ())),
         })
     }
 
     fn to_u8(self) -> ReadResult<u8> {
         Ok(match self {
-            CborUnsigned::UInt8(v) => v as u8,
+            CborUnsigned::UInt8(v) => v,
             _ => return Err(ReadError::ty_mismatch(Type::UInt8, self.typ())),
         })
     }
@@ -520,7 +520,7 @@ impl CborSigned {
         Ok(match self {
             CborSigned::Int8(v) => v as i32,
             CborSigned::Int16(v) => v as i32,
-            CborSigned::Int32(v) => v as i32,
+            CborSigned::Int32(v) => v,
             _ => return Err(ReadError::ty_mismatch(Type::Int32, self.typ())),
         })
     }
@@ -528,14 +528,14 @@ impl CborSigned {
     fn to_i16(self) -> ReadResult<i16> {
         Ok(match self {
             CborSigned::Int8(v) => v as i16,
-            CborSigned::Int16(v) => v as i16,
+            CborSigned::Int16(v) => v,
             _ => return Err(ReadError::ty_mismatch(Type::Int16, self.typ())),
         })
     }
 
     fn to_i8(self) -> ReadResult<i8> {
         Ok(match self {
-            CborSigned::Int8(v) => v as i8,
+            CborSigned::Int8(v) => v,
             _ => return Err(ReadError::ty_mismatch(Type::Int8, self.typ())),
         })
     }

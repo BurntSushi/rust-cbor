@@ -1,3 +1,5 @@
+#![allow(trivial_casts)]
+
 extern crate cbor;
 extern crate quickcheck;
 extern crate rand;
@@ -45,6 +47,7 @@ macro_rules! round_trip_num {
     ($name:ident, $ty:ident) => (
         #[test]
         fn $name() {
+            #![allow(trivial_numeric_casts)]
             fn prop(n: $ty) -> bool { round_trip(n) }
             qc_sized(prop as fn($ty) -> bool, ::std::$ty::MAX as u64)
         }
