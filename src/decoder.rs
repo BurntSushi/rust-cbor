@@ -1,4 +1,4 @@
-use std::borrow::IntoCow;
+use std::convert::Into;
 use std::collections::hash_map::HashMap;
 use std::io::{self, Read};
 use std::mem::transmute;
@@ -275,10 +275,9 @@ impl Decoder<io::Cursor<Vec<u8>>> {
     /// Create a new CBOR decoder that reads from the buffer given.
     ///
     /// The buffer is usually given as either a `Vec<u8>` or a `&[u8]`.
-    pub fn from_bytes<'a, T>(bytes: T) -> Decoder<io::Cursor<Vec<u8>>>
-            where T: IntoCow<'a, [u8]> {
-        let rdr = io::Cursor::new(bytes.into_cow().into_owned());
-        Decoder { rdr: CborReader::new(rdr) }
+    pub fn from_bytes<T>(bytes: T) -> Decoder<io::Cursor<Vec<u8>>>
+            where T: Into<Vec<u8>> {
+        Decoder { rdr: CborReader::new(io::Cursor::new(bytes.into())) }
     }
 }
 

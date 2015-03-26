@@ -1,4 +1,4 @@
-use std::borrow::{IntoCow, ToOwned};
+use std::convert::Into;
 use std::char;
 use std::io::{self, Read};
 
@@ -26,9 +26,8 @@ impl CborDecoder<io::Cursor<Vec<u8>>> {
     ///
     /// The buffer is usually given as either a `Vec<u8>` or a `&[u8]`.
     pub fn from_bytes<'a, T>(bytes: T) -> CborDecoder<io::Cursor<Vec<u8>>>
-            where T: IntoCow<'a, [u8]> {
-        let rdr = io::Cursor::new(bytes.into_cow().into_owned());
-        CborDecoder { rdr: CborReader::new(rdr) }
+            where T: Into<Vec<u8>> {
+        CborDecoder { rdr: CborReader::new(io::Cursor::new(bytes.into())) }
     }
 }
 
@@ -166,7 +165,7 @@ impl<R: io::Read> RustcDecoder for CborDecoder<R> {
     type Error = CborError;
 
     fn error(&mut self, err: &str) -> CborError {
-        self.err(ReadError::Other(err.to_owned()))
+        self.err(ReadError::Other(err.into()))
     }
 
     fn read_nil(&mut self) -> CborResult<()> {

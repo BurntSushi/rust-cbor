@@ -15,7 +15,7 @@ name = "cbor"
 
 [[test]]
 name = "tests"
-test = false
+test = true
 bench = false
 
 [[bench]]

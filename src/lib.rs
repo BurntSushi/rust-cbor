@@ -48,7 +48,7 @@ This example shows how to encode and decode a custom data type as a CBOR
 tag:
 
 ```rust
-# extern crate "rustc-serialize" as rustc_serialize;
+# extern crate rustc_serialize;
 # extern crate cbor;
 # fn main() {
 use cbor::CborTagEncode;
@@ -90,7 +90,7 @@ decoding methods used in the first example.
 Converting to JSON is simple because `Cbor` implements the `ToJson` trait:
 
 ```rust
-# extern crate "rustc-serialize" as rustc_serialize;
+# extern crate rustc_serialize;
 # extern crate cbor;
 # fn main() {
 # fn s(x: &str) -> String { x.to_string() }
@@ -117,8 +117,10 @@ so you can convert JSON to CBOR in a similar manner as above.
 #![doc(html_root_url = "http://burntsushi.net/rustdoc/cbor")]
 #![deny(missing_docs)]
 
+#![feature(convert)]
+
 extern crate byteorder;
-extern crate "rustc-serialize" as rustc_serialize;
+extern crate rustc_serialize;
 
 use std::collections::HashMap;
 use std::error::FromError;
@@ -338,7 +340,7 @@ pub struct CborTag {
 ///
 ///
 /// ```rust
-/// # extern crate "rustc-serialize" as rustc_serialize;
+/// # extern crate rustc_serialize;
 /// # extern crate cbor;
 /// # fn main() {
 /// use cbor::CborTagEncode;
