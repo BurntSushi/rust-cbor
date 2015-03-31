@@ -1,7 +1,7 @@
 #![feature(test)]
 
 extern crate cbor;
-extern crate "rustc-serialize" as rustc_serialize;
+extern crate rustc_serialize;
 extern crate test;
 
 use std::iter::repeat;
