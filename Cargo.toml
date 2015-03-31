@@ -13,17 +13,6 @@ license = "Unlicense"
 [lib]
 name = "cbor"
 
-[[test]]
-name = "tests"
-test = true
-bench = false
-
-[[bench]]
-path = "./tests/bench.rs"
-name = "bench"
-test = false
-bench = true
-
 [dependencies]
 byteorder = "*"
 rustc-serialize = "*"
