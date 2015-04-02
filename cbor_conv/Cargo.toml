@@ -25,5 +25,8 @@ test = false
 bench = false
 
 [dependencies]
-cbor = "*"
 rustc-serialize = "*"
+
+[dependencies.cbor]
+path = ".."
+version = "*"

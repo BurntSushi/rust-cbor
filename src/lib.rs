@@ -117,13 +117,10 @@ so you can convert JSON to CBOR in a similar manner as above.
 #![doc(html_root_url = "http://burntsushi.net/rustdoc/cbor")]
 #![deny(missing_docs)]
 
-#![feature(convert)]
-
 extern crate byteorder;
 extern crate rustc_serialize;
 
 use std::collections::HashMap;
-use std::error::FromError;
 use std::fmt;
 use std::io;
 
@@ -146,7 +143,7 @@ macro_rules! lg {
 }
 
 macro_rules! fromerr {
-    ($e:expr) => ($e.map_err(::std::error::FromError::from_error));
+    ($e:expr) => ($e.map_err(::std::convert::From::from));
 }
 
 /// All core types defined in the CBOR specification.
@@ -646,7 +643,7 @@ pub type CborResult<T> = Result<T, CborError>;
 type ReadResult<T> = Result<T, ReadError>;
 
 /// Errors that can be produced by a CBOR operation.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum CborError {
     /// An error as a result of an  underlying IO operation.
     Io(io::Error),
@@ -724,15 +721,15 @@ pub enum WriteError {
     },
 }
 
-impl FromError<io::Error> for CborError {
-    fn from_error(err: io::Error) -> CborError { CborError::Io(err) }
+impl From<io::Error> for CborError {
+    fn from(err: io::Error) -> CborError { CborError::Io(err) }
 }
 
-impl FromError<byteorder::Error> for CborError {
-    fn from_error(err: byteorder::Error) -> CborError {
+impl From<byteorder::Error> for CborError {
+    fn from(err: byteorder::Error) -> CborError {
         match err {
             byteorder::Error::UnexpectedEOF => CborError::UnexpectedEOF,
-            byteorder::Error::Io(err) => FromError::from_error(err),
+            byteorder::Error::Io(err) => From::from(err),
         }
     }
 }

@@ -92,7 +92,7 @@ impl<W: io::Write> Encoder<W> {
     ///
     /// let mut enc = Encoder::from_memory();
     /// enc.encode(&[1, 2, 3, 4, 5]);
-    /// assert_eq!(enc.as_bytes(), vec![1, 2, 3, 4, 5]);
+    /// assert_eq!(vec![1, 2, 3, 4, 5], enc.as_bytes());
     /// ```
     pub fn encode<I>(&mut self, it: I) -> CborResult<()>
         where I: IntoIterator,

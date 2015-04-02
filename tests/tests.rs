@@ -1,5 +1,3 @@
-#![allow(trivial_casts)]
-
 extern crate cbor;
 extern crate quickcheck;
 extern crate rand;

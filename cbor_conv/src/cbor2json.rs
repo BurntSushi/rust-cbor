@@ -1,9 +1,6 @@
-#![feature(exit_status, io)]
-
 extern crate cbor;
-extern crate "rustc-serialize" as rustc_serialize;
+extern crate rustc_serialize;
 
-use std::env::set_exit_status;
 use std::io::{self, Write};
 
 use cbor::Decoder;
@@ -18,7 +15,7 @@ fn main() {
         ($e:expr) => (
             match $e {
                 Ok(v) => v,
-                Err(err) => { err!("{}", err); set_exit_status(1); return; }
+                Err(err) => { err!("{}", err); ::std::process::exit(1); }
             }
         );
     }
