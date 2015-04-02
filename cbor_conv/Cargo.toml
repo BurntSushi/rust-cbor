@@ -1,6 +1,6 @@
 [package]
 name = "cbor_conv"
-version = "0.2.1"  #:version
+version = "0.2.2"  #:version
 authors = ["Andrew Gallant <jamslam@gmail.com>"]
 description = "Command line tools for converting between CBOR and JSON."
 documentation = "http://burntsushi.net/rustdoc/cbor/"
