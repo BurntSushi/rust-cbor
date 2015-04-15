@@ -6,7 +6,7 @@ include a balance of implementation size, message size and extensibility.
 
 [![Build status](https://api.travis-ci.org/BurntSushi/rust-cbor.png)](https://travis-ci.org/BurntSushi/rust-cbor)
 
-Licensed under the [UNLICENSE](http://unlicense.org).
+Dual-licensed under MIT or the [UNLICENSE](http://unlicense.org).
 
 
 ### Documentation
