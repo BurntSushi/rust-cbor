@@ -5,6 +5,7 @@ model* used by JSON, except the encoding is in binary form. Its primary goals
 include a balance of implementation size, message size and extensibility.
 
 [![Build status](https://api.travis-ci.org/BurntSushi/rust-cbor.png)](https://travis-ci.org/BurntSushi/rust-cbor)
+[![](http://meritbadge.herokuapp.com/cbor)](https://crates.io/crates/cbor)
 
 Dual-licensed under MIT or the [UNLICENSE](http://unlicense.org).
 
