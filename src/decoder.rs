@@ -1,3 +1,4 @@
+use std::cmp;
 use std::convert::Into;
 use std::collections::hash_map::HashMap;
 use std::io::{self, Read};
@@ -189,7 +190,7 @@ impl<R: io::Read> Decoder<R> {
 
     fn read_array(&mut self, first: u8) -> CborResult<Cbor> {
         let len = try!(self.read_len(first));
-        let mut array = Vec::with_capacity(len);
+        let mut array = Vec::with_capacity(cmp::min(100000, len));
         for _ in 0..len {
             let v = try!(self.read_data_item(None));
             array.push(v);

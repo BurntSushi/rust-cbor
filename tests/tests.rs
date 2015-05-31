@@ -9,7 +9,7 @@ use rand::thread_rng;
 use rustc_serialize::{Decodable, Encodable};
 use quickcheck::{QuickCheck, StdGen, Testable};
 
-use cbor::{Encoder, Decoder, Cbor, CborBytes, CborTagEncode};
+use cbor::{Encoder, Decoder, DirectDecoder, Cbor, CborBytes, CborTagEncode};
 
 fn qc_sized<A: Testable>(f: A, size: u64) {
     QuickCheck::new()
@@ -208,5 +208,12 @@ fn roundtrip_tag_fancier_data() {
 #[test]
 fn test_oom() {
    let bad = vec![155u8, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF];
-   let _: Vec<u32> = decode(&bad[..]);
+   let mut dec = Decoder::from_bytes(bad);
+   assert!(dec.decode::<Vec<u32>>().next().is_none());
 }
+
+// #[test]
+// fn test_oom_direct() {
+   // let bad = vec![155u8, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF];
+   // assert!(Vec::<u32>::decode(&mut DirectDecoder::from_bytes(bad)).is_err());
+// }

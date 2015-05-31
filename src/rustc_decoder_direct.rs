@@ -9,6 +9,12 @@ use {Type, CborResult, CborError, ReadError};
 
 /// Experimental and incomplete direct decoder.
 ///
+/// **WARNING:** Do not use this to decode CBOR data that you don't control.
+/// It is currently subject to an attack vector that permits an attacker to
+/// cause your process to abort due to an out-of-memory error.
+/// See: https://github.com/rust-lang/rustc-serialize/issues/115
+/// (The normal decoder in this crate is not subject to this problem.)
+///
 /// A "direct" decoder is one that does not use an intermediate abstact syntax
 /// representation. Namely, the bytes are decoded directly into types. This
 /// *significantly* impacts performance. For example, it doesn't have to box
