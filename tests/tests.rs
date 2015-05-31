@@ -204,3 +204,9 @@ fn roundtrip_tag_fancier_data() {
         value: vec![1, 2, 3, 4, 5],
     }));
 }
+
+#[test]
+fn test_oom() {
+   let bad = vec![155u8, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF];
+   let _: Vec<u32> = decode(&bad[..]);
+}
