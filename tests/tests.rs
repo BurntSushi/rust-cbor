@@ -9,7 +9,7 @@ use rand::thread_rng;
 use rustc_serialize::{Decodable, Encodable};
 use quickcheck::{QuickCheck, StdGen, Testable};
 
-use cbor::{Encoder, Decoder, Cbor, CborBytes, CborTagEncode};
+use cbor::{Encoder, Decoder, Cbor, CborBytes, CborSigned, CborTagEncode};
 
 fn qc_sized<A: Testable>(f: A, size: u64) {
     QuickCheck::new()
@@ -203,6 +203,29 @@ fn roundtrip_tag_fancier_data() {
         name: DataName(b"hello".to_vec()),
         value: vec![1, 2, 3, 4, 5],
     }));
+}
+
+#[test]
+fn rpc_decode() {
+    #[derive(RustcDecodable, RustcEncodable)]
+    struct Message {
+        id: i64,
+        method: String,
+        params: CborBytes,
+    }
+
+    let send = encode(Message {
+        id: 123,
+        method: "foobar".to_owned(),
+        params: CborBytes(encode(("val".to_owned(), true, -5,))),
+    });
+    let msg: Message = decode(&send);
+
+    assert_eq!(msg.method, "foobar");
+    let (val1, val2, val3): (String, bool, i32) = decode(&msg.params.0);
+    assert_eq!(val1, "val");
+    assert_eq!(val2, true);
+    assert_eq!(val3, -5);
 }
 
 #[test]
