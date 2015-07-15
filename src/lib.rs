@@ -131,6 +131,7 @@ use rustc_serialize::{Decodable, Encodable};
 pub use decoder::{DecodedItems, Decoder, Items};
 pub use encoder::Encoder;
 pub use json::ToCbor;
+use rustc_decoder::CborDecoder;
 pub use rustc_decoder_direct::CborDecoder as DirectDecoder;
 
 // A trivial logging macro. No reason to pull in `log`, which has become
@@ -406,6 +407,11 @@ impl<'a, T> CborTagEncode<'a, T> {
 }
 
 impl Cbor {
+    /// Decode a single CBOR value.
+    pub fn decode<D: Decodable>(self) -> CborResult<D> {
+        Decodable::decode(&mut CborDecoder::new(self))
+    }
+
     fn typ(&self) -> Type {
         match *self {
             Cbor::Break => Type::Break,
