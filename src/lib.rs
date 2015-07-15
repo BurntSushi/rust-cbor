@@ -128,7 +128,7 @@ use rustc_serialize::Decoder as RustcDecoder;
 use rustc_serialize::Encoder as RustcEncoder;
 use rustc_serialize::{Decodable, Encodable};
 
-pub use decoder::Decoder;
+pub use decoder::{DecodedItems, Decoder, Items};
 pub use encoder::Encoder;
 pub use json::ToCbor;
 pub use rustc_decoder_direct::CborDecoder as DirectDecoder;
