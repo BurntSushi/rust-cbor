@@ -425,6 +425,11 @@ impl Cbor {
 }
 
 impl CborUnsigned {
+    /// Return the underlying value as a `u64`.
+    pub fn into_u64(self) -> u64 {
+        self.to_u64().unwrap()
+    }
+
     fn typ(self) -> Type {
         match self {
             CborUnsigned::UInt8(_) => Type::UInt8,
@@ -482,6 +487,11 @@ impl CborUnsigned {
 }
 
 impl CborSigned {
+    /// Return the underlying value as a `i64`.
+    pub fn into_i64(self) -> i64 {
+        self.to_i64().unwrap()
+    }
+
     fn typ(self) -> Type {
         match self {
             CborSigned::Int8(_) => Type::Int8,
@@ -539,6 +549,11 @@ impl CborSigned {
 }
 
 impl CborFloat {
+    /// Return the underlying value as a `f64`.
+    pub fn into_f64(self) -> f64 {
+        self.to_f64().unwrap()
+    }
+
     fn typ(self) -> Type {
         match self {
             CborFloat::Float16(_) => Type::Float16,
