@@ -413,6 +413,14 @@ impl Cbor {
         Decodable::decode(&mut CborDecoder::new(self))
     }
 
+    /// If this is a CBOR tag, return the tag number.
+    pub fn tag(&self) -> Option<u64> {
+        match *self {
+            Cbor::Tag(CborTag { tag, .. }) => Some(tag),
+            _ => None,
+        }
+    }
+
     fn typ(&self) -> Type {
         match *self {
             Cbor::Break => Type::Break,

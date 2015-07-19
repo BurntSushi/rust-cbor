@@ -9,7 +9,7 @@ use rand::thread_rng;
 use rustc_serialize::{Decodable, Encodable};
 use quickcheck::{QuickCheck, StdGen, Testable};
 
-use cbor::{Encoder, Decoder, Cbor, CborBytes, CborSigned, CborTagEncode};
+use cbor::{Encoder, Decoder, Cbor, CborBytes, CborTagEncode};
 
 fn qc_sized<A: Testable>(f: A, size: u64) {
     QuickCheck::new()
