@@ -3,7 +3,7 @@ use std::char;
 
 use rustc_serialize::Decoder as RustcDecoder;
 
-use {Cbor, CborUnsigned, Type, CborResult, CborError, ReadError};
+use {Cbor, CborUnsigned, CborBytes, Type, CborResult, CborError, ReadError};
 
 pub struct CborDecoder {
     stack: Vec<Cbor>,
@@ -165,9 +165,17 @@ impl RustcDecoder for CborDecoder {
     }
 
     fn read_str(&mut self) -> CborResult<String> {
-        match try!(self.pop(Type::Unicode)) {
-            Cbor::Unicode(s) => Ok(s),
-            v => Err(self.err(ReadError::mismatch(Type::Unicode, &v))),
+        match self.stack.pop() {
+            Some(Cbor::Unicode(s)) => Ok(s),
+            Some(Cbor::Bytes(CborBytes(bytes))) => {
+                String::from_utf8(bytes).map_err(|err| {
+                    self.err(ReadError::Other(err.to_string()))
+                })
+            }
+            Some(v) => Err(self.err(ReadError::mismatch(Type::Unicode, &v))),
+            None => Err(self.errstr(format!(
+                "No data items left (expected a data item with type '{:?}').",
+                Type::Unicode))),
         }
     }
 
@@ -275,7 +283,9 @@ impl RustcDecoder for CborDecoder {
     where F: FnOnce(&mut CborDecoder) -> CborResult<T> {
         let mut map = match try!(self.pop(Type::Map)) {
             Cbor::Map(map) => map,
-            v => return Err(self.err(ReadError::mismatch(Type::Map, &v))),
+            v => {
+                return Err(self.err(ReadError::mismatch(Type::Map, &v)));
+            }
         };
         let val = match map.remove(f_name) {
             Some(val) => { self.stack.push(val); try!(f(self)) }

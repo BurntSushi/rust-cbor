@@ -177,6 +177,15 @@ impl<R: io::Read> Decoder<R> {
         for _ in 0..len {
             let key = match try!(self.read_data_item(None)) {
                 Cbor::Unicode(s) => s,
+                Cbor::Bytes(CborBytes(bytes)) => {
+                    match String::from_utf8(bytes) {
+                        Ok(s) => s,
+                        Err(err) => return Err(CborError::AtOffset {
+                            kind: ReadError::Other(err.to_string()),
+                            offset: at,
+                        }),
+                    }
+                }
                 v => return Err(CborError::AtOffset {
                     kind: ReadError::mismatch(Type::Unicode, &v),
                     offset: at,
