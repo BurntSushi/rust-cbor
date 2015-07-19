@@ -121,6 +121,7 @@ extern crate byteorder;
 extern crate rustc_serialize;
 
 use std::collections::HashMap;
+use std::error::Error;
 use std::fmt;
 use std::io;
 
@@ -751,6 +752,26 @@ impl From<byteorder::Error> for CborError {
         match err {
             byteorder::Error::UnexpectedEOF => CborError::UnexpectedEOF,
             byteorder::Error::Io(err) => From::from(err),
+        }
+    }
+}
+
+impl Error for CborError {
+    fn description(&self) -> &str {
+        use CborError::*;
+        match *self {
+            Io(ref err) => err.description(),
+            Decode(_) => "decode error",
+            Encode(_) => "encode error",
+            AtOffset { .. } => "read error",
+            UnexpectedEOF => "unexpected EOF",
+        }
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        match *self {
+            CborError::Io(ref err) => err.cause(),
+            _ => None,
         }
     }
 }
