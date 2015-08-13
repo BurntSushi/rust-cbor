@@ -9,20 +9,14 @@ use cbor::{Decoder, DirectDecoder, Encoder};
 use rustc_serialize::{Decodable, Encodable};
 use rustc_serialize::json::{self, Json, ToJson};
 
-fn cbor_encode<T: Encodable>(v: T) -> Vec<u8> {
-    let mut enc = Encoder::from_memory();
-    enc.encode(&[v]).unwrap();
-    enc.as_bytes().to_vec()
-}
-
 #[bench]
 fn encode_small_cbor(b: &mut test::Bencher) {
     let data = ("hello, world".to_string(),
                 true, (), vec![1, 1000, 100_000, 10_000_000], 3.14);
 
-    b.bytes = cbor_encode(&data).len() as u64;
+    b.bytes = cbor::encode(&data).len() as u64;
     b.iter(|| {
-        cbor_encode(&data);
+        cbor::encode(&data);
     });
 }
 
@@ -54,9 +48,9 @@ fn encode_medium_cbor(b: &mut test::Bencher) {
                 true, (), vec![1, 1000, 100_000, 10_000_000], 3.14);
     let items = repeat(&data).take(10_000).collect::<Vec<_>>();
 
-    b.bytes = cbor_encode(&items).len() as u64;
+    b.bytes = cbor::encode(&items).len() as u64;
     b.iter(|| {
-        cbor_encode(&items);
+        cbor::encode(&items);
     });
 }
 

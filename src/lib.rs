@@ -117,8 +117,12 @@ so you can convert JSON to CBOR in a similar manner as above.
 #![doc(html_root_url = "http://burntsushi.net/rustdoc/cbor")]
 #![deny(missing_docs)]
 
+#![feature(custom_derive, plugin)]
+#![plugin(serde_macros)]
+
 extern crate byteorder;
 extern crate rustc_serialize;
+extern crate serde;
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -128,12 +132,15 @@ use std::io;
 use rustc_serialize::Decoder as RustcDecoder;
 use rustc_serialize::Encoder as RustcEncoder;
 use rustc_serialize::{Decodable, Encodable};
+use serde::{Serialize, Deserialize, ser};
 
 pub use decoder::{DecodedItems, Decoder, Items};
 pub use encoder::Encoder;
 pub use json::ToCbor;
 use rustc_decoder::CborDecoder;
 pub use rustc_decoder_direct::CborDecoder as DirectDecoder;
+pub use serializer::Serializer;
+pub use deserializer::Deserializer;
 
 // A trivial logging macro. No reason to pull in `log`, which has become
 // difficult to use in tests.
@@ -326,6 +333,43 @@ pub struct CborTag {
     pub data: Box<Cbor>,
 }
 
+impl Serialize for CborTag {
+    fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error>
+        where S: ser::Serializer
+    {
+        struct Visitor<'a> {
+            state: usize,
+            value: &'a CborTag,
+        }
+
+        impl <'a> ser::MapVisitor for Visitor<'a> {
+            #[inline]
+            fn visit<S>(&mut self, serializer: &mut S) -> Result<Option<()>, S::Error>
+                where S: ser::Serializer
+            {
+                match self.state {
+                    0 => {
+                        self.state += 1;
+                        Ok(Some(try!(serializer.visit_struct_elt("tag", &self.value.tag))))
+                    }
+                    1 => {
+                        self.state += 1;
+                        Ok(Some(try!(serializer.visit_struct_elt("data", &self.value.data))))
+                    }
+                    _ => Ok(None),
+                }
+            }
+            #[inline]
+            fn len(&self) -> Option<usize> { Some(2) }
+        }
+
+        serializer.visit_struct("CborTag", Visitor {
+            value: self,
+            state: 0,
+        })
+    }
+}
+
 /// A special type that can be used to encode CBOR tags.
 ///
 /// This is a "special" type because its used is hard-coded into the
@@ -404,6 +448,51 @@ impl<'a, T> CborTagEncode<'a, T> {
             __cbor_tag_encode_tag: tag,
             __cbor_tag_encode_data: data,
         }
+    }
+}
+
+impl<'a, T> Serialize for CborTagEncode<'a, T>
+    where T: Serialize,
+{
+    fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error>
+        where S: ser::Serializer
+    {
+        struct Visitor<'a, T: 'a> {
+            state: usize,
+            value: &'a CborTagEncode<'a, T>,
+        }
+
+        impl<'a, T> ser::MapVisitor for Visitor<'a, T>
+            where T: Serialize,
+        {
+            #[inline]
+            fn visit<S>(&mut self, serializer: &mut S) -> Result<Option<()>, S::Error>
+                where S: ser::Serializer
+            {
+                match self.state {
+                    0 => {
+                        self.state += 1;
+                        Ok(Some(try!(serializer.visit_struct_elt(
+                            "__cbor_tag_encode_tag",
+                            &self.value.__cbor_tag_encode_tag))))
+                    }
+                    1 => {
+                        self.state += 1;
+                        Ok(Some(try!(serializer.visit_struct_elt(
+                            "__cbor_tag_encode_data",
+                            &self.value.__cbor_tag_encode_data))))
+                    }
+                    _ => Ok(None),
+                }
+            }
+            #[inline]
+            fn len(&self) -> Option<usize> { Some(2) }
+        }
+
+        serializer.visit_struct("CborTagEncode", Visitor {
+            value: self,
+            state: 0,
+        })
     }
 }
 
@@ -666,6 +755,87 @@ impl Decodable for CborBytes {
     }
 }
 
+impl Serialize for CborBytes {
+    fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error>
+        where S: serde::Serializer,
+    {
+        serializer.visit_bytes(self)
+    }
+}
+
+impl Deserialize for CborBytes {
+    fn deserialize<D>(deserializer: &mut D) -> Result<CborBytes, D::Error>
+        where D: serde::Deserializer,
+    {
+        let value: serde::bytes::ByteBuf = try!(Deserialize::deserialize(deserializer));
+        Ok(CborBytes(value.into()))
+    }
+}
+
+
+impl Serialize for Cbor {
+    fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error>
+        where S: serde::ser::Serializer,
+    {
+        match *self {
+            // Not sure what to do with `Break` here. I guess if we need to
+            // be able to encode, we'll have to add special support for it
+            // in the encoder.
+            Cbor::Break => unimplemented!(),
+            Cbor::Undefined => serializer.visit_unit(),
+            Cbor::Null => serializer.visit_unit(),
+            Cbor::Bool(v) => v.serialize(serializer),
+            Cbor::Unsigned(v) => v.serialize(serializer),
+            Cbor::Signed(v) => v.serialize(serializer),
+            Cbor::Float(v) => v.serialize(serializer),
+            Cbor::Bytes(ref v) => v.serialize(serializer),
+            Cbor::Unicode(ref v) => v.serialize(serializer),
+            Cbor::Array(ref v) => v.serialize(serializer),
+            Cbor::Map(ref v) => v.serialize(serializer),
+            Cbor::Tag(ref v) => v.serialize(serializer),
+        }
+    }
+}
+
+impl Serialize for CborUnsigned {
+    fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error>
+        where S: serde::Serializer,
+    {
+        match *self {
+            CborUnsigned::UInt8(v) => v.serialize(serializer),
+            CborUnsigned::UInt16(v) => v.serialize(serializer),
+            CborUnsigned::UInt32(v) => v.serialize(serializer),
+            CborUnsigned::UInt64(v) => v.serialize(serializer),
+        }
+    }
+}
+
+impl Serialize for CborSigned {
+    fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error>
+        where S: serde::Serializer,
+    {
+        match *self {
+            CborSigned::Int8(v) => v.serialize(serializer),
+            CborSigned::Int16(v) => v.serialize(serializer),
+            CborSigned::Int32(v) => v.serialize(serializer),
+            CborSigned::Int64(v) => v.serialize(serializer),
+        }
+    }
+}
+
+impl Serialize for CborFloat {
+    fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error>
+        where S: serde::Serializer,
+    {
+        match *self {
+            CborFloat::Float16(v) => v.serialize(serializer),
+            CborFloat::Float32(v) => v.serialize(serializer),
+            CborFloat::Float64(v) => v.serialize(serializer),
+        }
+    }
+}
+
+
 /// Type synonym for `Result<T, CborError>`.
 pub type CborResult<T> = Result<T, CborError>;
 
@@ -695,6 +865,24 @@ pub enum CborError {
     ///
     /// EOF is triggered when the underlying reader returns `0` bytes.
     UnexpectedEOF,
+}
+
+impl serde::de::Error for CborError {
+    fn syntax(msg: &str) -> Self {
+        CborError::Decode(ReadError::Other(format!("syntax error: {}", msg)))
+    }
+
+    fn end_of_stream() -> Self {
+        CborError::UnexpectedEOF
+    }
+
+    fn unknown_field(field: &str) -> Self {
+        CborError::Decode(ReadError::Other(format!("unknown field: {}", field)))
+    }
+
+    fn missing_field(field: &'static str) -> Self {
+        CborError::Decode(ReadError::Other(format!("missing field: {}", field)))
+    }
 }
 
 impl CborError {
@@ -862,3 +1050,51 @@ mod encoder;
 mod json;
 mod rustc_decoder;
 mod rustc_decoder_direct;
+mod serializer;
+mod deserializer;
+
+/// Encode a CBOR value into a Vec<u8>.
+pub fn encode<T: Encodable>(v: T) -> Vec<u8> {
+    let mut ser = Encoder::from_memory();
+    ser.encode(&[v]).unwrap();
+    ser.as_bytes().to_vec()
+}
+
+/// Encode a CBOR value into a writer.
+pub fn encode_into<W: io::Write, T: Encodable>(wr: W, v: T) -> CborResult<()> {
+    let mut ser = Encoder::from_writer(wr);
+    ser.encode(&[v])
+}
+
+/// Decode a CBOR value from a `&[u8]`.
+pub fn decode<T: Decodable>(bytes: &[u8]) -> CborResult<T> {
+    Decoder::from_bytes(bytes).decode().next().unwrap()
+}
+
+/// Decode a CBOR value from a reader.
+pub fn decode_from<R: io::Read, T: Decodable>(rdr: R) -> CborResult<T> {
+    Decoder::from_reader(rdr).decode().next().unwrap()
+}
+
+/// Serialize a CBOR value into a Vec<u8>.
+pub fn serialize<T: Serialize>(v: T) -> Vec<u8> {
+    let mut ser = Serializer::from_memory();
+    ser.serialize(&[v]).unwrap();
+    ser.as_bytes().to_vec()
+}
+
+/// Serialize a CBOR value into a writer.
+pub fn serialize_into<W: io::Write, T: Serialize>(wr: W, v: T) -> CborResult<()> {
+    let mut ser = Serializer::from_writer(wr);
+    ser.serialize(&[v])
+}
+
+/// Deserialize a CBOR value from a `&[u8]`.
+pub fn deserialize<T: Deserialize>(bytes: &[u8]) -> CborResult<T> {
+    Deserialize::deserialize(&mut Deserializer::from_bytes(bytes))
+}
+
+/// Deserialize a CBOR value from a reader.
+pub fn deserialize_from<R: io::Read, T: Deserialize>(rdr: R) -> CborResult<T> {
+    Deserialize::deserialize(&mut Deserializer::from_reader(rdr))
+}

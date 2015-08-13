@@ -1,15 +1,19 @@
+#![feature(custom_derive, plugin)]
+#![plugin(serde_macros)]
+
 extern crate cbor;
 extern crate quickcheck;
 extern crate rand;
 extern crate rustc_serialize;
+extern crate serde;
 
 use std::collections::HashMap;
 use std::fmt::Debug;
 use rand::thread_rng;
-use rustc_serialize::{Decodable, Encodable};
 use quickcheck::{QuickCheck, StdGen, Testable};
+use serde::{ser, de, Deserialize, Serialize};
 
-use cbor::{Decoder, CborBytes, CborTagEncode};
+use cbor::{Serializer, CborBytes, CborTagEncode};
 
 fn qc_sized<A: Testable>(f: A, size: u64) {
     QuickCheck::new()
@@ -20,8 +24,8 @@ fn qc_sized<A: Testable>(f: A, size: u64) {
 }
 
 fn round_trip<T>(v: T) -> bool
-        where T: Decodable + Encodable + Debug + PartialEq {
-    let backv: T = cbor::decode(&cbor::encode(&v)).unwrap();
+        where T: Deserialize + Serialize + Debug + PartialEq {
+    let backv: T = cbor::deserialize(&cbor::serialize(&v)).unwrap();
     assert_eq!(backv, v);
     true
 }
@@ -109,7 +113,7 @@ fn roundtrip_prop_byte_string() {
 
 #[test]
 fn roundtrip_enum() {
-    #[derive(Debug, PartialEq, RustcDecodable, RustcEncodable)]
+    #[derive(Debug, PartialEq, Deserialize, Serialize)]
     enum Color { Red, Blue(String, i32), Green { s: String, n: i32 } }
 
     round_trip(Color::Red);
@@ -119,7 +123,7 @@ fn roundtrip_enum() {
 
 #[test]
 fn roundtrip_struct() {
-    #[derive(Debug, PartialEq, RustcDecodable, RustcEncodable)]
+    #[derive(Debug, PartialEq, Deserialize, Serialize)]
     struct Vowels { s: String, n: u32 }
 
     round_trip(Vowels { s: "cwm".to_string(), n: 1 });
@@ -130,27 +134,30 @@ fn roundtrip_struct() {
 fn invalid_map_key() {
     let mut map = HashMap::new();
     map.insert(5, 5);
-    cbor::encode(map);
+    cbor::serialize(map);
 }
 
 #[test]
 fn roundtrip_prop_tag() {
-    use rustc_serialize::{Decoder, Encoder};
-
     #[derive(Debug, PartialEq)]
     struct MyTag {
         num: u64,
         data: Vec<i32>,
     }
-    impl Decodable for MyTag {
-        fn decode<D: Decoder>(d: &mut D) -> Result<MyTag, D::Error> {
-            let tag = try!(d.read_u64());
-            Ok(MyTag { num: tag, data: try!(Decodable::decode(d)) })
+    impl Deserialize for MyTag {
+        fn deserialize<D: de::Deserializer>(deserializer: &mut D) -> Result<MyTag, D::Error> {
+            let tag = try!(Deserialize::deserialize(deserializer));
+            Ok(MyTag {
+                num: tag,
+                data: try!(Deserialize::deserialize(deserializer)),
+            })
         }
     }
-    impl Encodable for MyTag {
-        fn encode<E: Encoder>(&self, e: &mut E) -> Result<(), E::Error> {
-            CborTagEncode::new(self.num, &self.data).encode(e)
+    impl Serialize for MyTag {
+        fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error>
+            where S: serde::Serializer,
+        {
+            CborTagEncode::new(self.num, &self.data).serialize(serializer)
         }
     }
     fn prop(num: u64, data: Vec<i32>) -> bool {
@@ -161,9 +168,7 @@ fn roundtrip_prop_tag() {
 
 #[test]
 fn roundtrip_tag_fancier_data() {
-    use rustc_serialize::{Decoder, Encoder};
-
-    #[derive(Debug, PartialEq, RustcDecodable, RustcEncodable)]
+    #[derive(Debug, PartialEq, Deserialize, Serialize)]
     struct DataName(Vec<u8>);
 
     #[derive(Debug, PartialEq)]
@@ -172,16 +177,16 @@ fn roundtrip_tag_fancier_data() {
         value: Vec<u8>,
     }
 
-    impl Decodable for CustomData {
-        fn decode<D: Decoder>(d: &mut D) -> Result<CustomData, D::Error> {
-            let _ = try!(d.read_u64());
-            let (name, value) = try!(Decodable::decode(d));
+    impl Deserialize for CustomData {
+        fn deserialize<D: de::Deserializer>(d: &mut D) -> Result<CustomData, D::Error> {
+            let _ = try!(u64::deserialize(d));
+            let (name, value) = try!(de::Deserialize::deserialize(d));
             Ok(CustomData { name: name, value: value })
         }
     }
-    impl Encodable for CustomData {
-        fn encode<E: Encoder>(&self, e: &mut E) -> Result<(), E::Error> {
-            CborTagEncode::new(100_000, &(&self.name, &self.value)).encode(e)
+    impl Serialize for CustomData {
+        fn serialize<S: ser::Serializer>(&self, s: &mut S) -> Result<(), S::Error> {
+            CborTagEncode::new(100_000, &(&self.name, &self.value)).serialize(s)
         }
     }
     assert!(round_trip(CustomData {
@@ -192,22 +197,22 @@ fn roundtrip_tag_fancier_data() {
 
 #[test]
 fn rpc_decode() {
-    #[derive(RustcDecodable, RustcEncodable)]
+    #[derive(Deserialize, Serialize)]
     struct Message {
         id: i64,
         method: String,
         params: CborBytes,
     }
 
-    let send = cbor::encode(Message {
+    let send = cbor::serialize(Message {
         id: 123,
         method: "foobar".to_owned(),
-        params: CborBytes(cbor::encode(("val".to_owned(), true, -5,))),
+        params: CborBytes(cbor::serialize(("val".to_owned(), true, -5,))),
     });
-    let msg: Message = cbor::decode(&send).unwrap();
+    let msg: Message = cbor::deserialize(&send).unwrap();
 
     assert_eq!(msg.method, "foobar");
-    let (val1, val2, val3): (String, bool, i32) = cbor::decode(&msg.params.0).unwrap();
+    let (val1, val2, val3): (String, bool, i32) = cbor::deserialize(&msg.params.0).unwrap();
     assert_eq!(val1, "val");
     assert_eq!(val2, true);
     assert_eq!(val3, -5);
@@ -216,8 +221,8 @@ fn rpc_decode() {
 #[test]
 fn test_oom() {
    let bad = vec![155u8, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF];
-   let mut dec = Decoder::from_bytes(bad);
-   assert!(dec.decode::<Vec<u32>>().next().is_none());
+   let mut dec: cbor::CborResult<Vec<u32>> = cbor::deserialize(&bad);
+   assert!(dec.is_err());
 }
 
 // #[test]

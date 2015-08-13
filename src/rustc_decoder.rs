@@ -192,29 +192,29 @@ impl RustcDecoder for CborDecoder {
     where F: FnMut(&mut CborDecoder, usize) -> CborResult<T> {
         let name = match try!(self.pop_expect("Unicode or variant map")) {
             Cbor::Unicode(name) => name,
-            Cbor::Map(mut map) => {
-                let name = match map.remove("variant") {
-                    Some(Cbor::Unicode(name)) => name,
-                    Some(v) => return Err(self.errstr(format!(
-                        "Expected 'variant' key in variant map to map to a \
-                         Unicode string, but got {:?}", v.typ()))),
-                    None => return Err(self.errstr(format!(
-                        "Missing 'variant' key in variant map"))),
-                };
-                match map.remove("fields") {
-                    Some(Cbor::Array(fields)) => {
-                        self.stack.extend(fields.into_iter().rev());
-                    },
-                    Some(v) => return Err(self.errstr(format!(
-                        "Expected 'fields' key in variant map to map to an \
-                         Array, but got {:?}", v.typ()))),
-                    None => return Err(self.errstr(format!(
-                        "Missing 'fields' key in variant map."))),
+            Cbor::Map(map) => {
+                if map.len() != 1 {
+                    return Err(self.errstr(
+                            String::from("Too many fields in variant map")));
                 }
+
+                let (name, fields) = map.into_iter().next().unwrap();
+
+                match fields {
+                    Cbor::Array(fields) => {
+                        self.stack.extend(fields.into_iter().rev());
+                    }
+                    v => {
+                        return Err(self.errstr(format!(
+                            "Expected value variant map to map to an \
+                             Array, but got {:?}", v.typ())));
+                    }
+                }
+
                 name
             }
             v => return Err(self.errstr(format!(
-                "Expected Unicode string or variant map, but got {:?}",
+                "Expected variant map, but got {:?}",
                 v.typ()))),
         };
         let idx = match names.iter().position(|&n| n == name) {

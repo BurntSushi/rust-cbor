@@ -16,7 +16,11 @@ name = "cbor"
 [dependencies]
 byteorder = "*"
 rustc-serialize = "*"
+serde = "*"
+serde_macros = "*"
 
 [dev-dependencies]
 quickcheck = "*"
 rand = "*"
+serde_json = "*"
+serde_macros = "*"

@@ -269,10 +269,8 @@ impl<W: io::Write> RustcEncoder for Encoder<W> {
             return self.emit_str(v_name);
         }
         no_string_key!(self);
-        try!(self.write_num(5, 2));
-        try!(self.emit_str("variant"));
+        try!(self.write_num(5, 1));
         try!(self.emit_str(v_name));
-        try!(self.emit_str("fields"));
         try!(self.write_num(4, len as u64));
         f(self)
     }
