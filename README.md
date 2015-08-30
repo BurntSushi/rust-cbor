@@ -24,7 +24,7 @@ Add it to your `Cargo.toml` like so:
 
 ```toml
 [dependencies]
-cbor = "*"
+cbor = "0.3"
 ```
 
 
