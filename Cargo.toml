@@ -1,6 +1,6 @@
 [package]
 name = "cbor"
-version = "0.3.15"  #:version
+version = "0.3.16"  #:version
 authors = ["Andrew Gallant <jamslam@gmail.com>"]
 description = "CBOR (binary JSON) with type based decoding and encoding."
 documentation = "http://burntsushi.net/rustdoc/cbor/"
