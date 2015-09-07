@@ -232,7 +232,7 @@ fn rpc_decode() {
 fn test_oom() {
    let bad = vec![155u8, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF];
    let mut dec = Decoder::from_bytes(bad);
-   assert!(dec.decode::<Vec<u32>>().next().is_none());
+   assert!(dec.decode::<Vec<u32>>().next().unwrap().is_err());
 }
 
 // #[test]
@@ -240,3 +240,11 @@ fn test_oom() {
    // let bad = vec![155u8, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF];
    // assert!(Vec::<u32>::decode(&mut DirectDecoder::from_bytes(bad)).is_err());
 // }
+
+#[test]
+fn return_error_on_incomplete_read() {
+    // regression test: https://github.com/BurntSushi/rust-cbor/issues/6
+    let buf = encode("hello");
+    let mut dec = Decoder::from_bytes(&buf[0..4]);
+    assert!(dec.decode::<String>().next().unwrap().is_err());
+}

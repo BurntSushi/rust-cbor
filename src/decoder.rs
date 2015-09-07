@@ -332,11 +332,12 @@ impl<'a, R: io::Read> Iterator for Items<'a, R> {
     type Item = CborResult<Cbor>;
 
     fn next(&mut self) -> Option<CborResult<Cbor>> {
-        match self.dec.read_data_item(None) {
-            Err(ref err) if err.is_eof() => None,
-            Err(err) => Some(Err(err)),
-            Ok(v) => Some(Ok(v)),
-        }
+        let first = match self.dec.rdr.read_u8().map_err(CborError::from) {
+            Ok(v) => v,
+            Err(ref err) if err.is_eof() => return None,
+            Err(err) => return Some(Err(err)),
+        };
+        Some(self.dec.read_data_item(Some(first)))
     }
 }
 
