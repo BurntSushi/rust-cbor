@@ -752,14 +752,11 @@ pub enum WriteError {
 }
 
 impl From<io::Error> for CborError {
-    fn from(err: io::Error) -> CborError { CborError::Io(err) }
-}
-
-impl From<byteorder::Error> for CborError {
-    fn from(err: byteorder::Error) -> CborError {
-        match err {
-            byteorder::Error::UnexpectedEOF => CborError::UnexpectedEOF,
-            byteorder::Error::Io(err) => From::from(err),
+    fn from(err: io::Error) -> CborError {
+        if err.kind() == io::ErrorKind::UnexpectedEof {
+            CborError::UnexpectedEOF
+        } else {
+            CborError::Io(err)
         }
     }
 }
