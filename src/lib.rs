@@ -308,8 +308,8 @@ pub struct CborBytes(pub Vec<u8>);
 /// A tag (major type 6).
 ///
 /// Note that if you want to *encode* a tag, you should use the `CborTagEncode`
-/// type and *not* this type. This type is only useful when your manually
-/// expecting the structure of a CBOR data item.
+/// type and *not* this type. This type is only useful when you are manually
+/// inspecting the structure of a CBOR data item.
 #[derive(Clone, Debug, PartialEq, RustcEncodable)]
 pub struct CborTag {
     /// The tag number.
@@ -328,7 +328,7 @@ pub struct CborTag {
 
 /// A special type that can be used to encode CBOR tags.
 ///
-/// This is a "special" type because its used is hard-coded into the
+/// This is a "special" type because its use is hard-coded into the
 /// implementation of the encoder. When encoded, the encoder will make sure
 /// that it is properly represented as a CBOR tag.
 ///
