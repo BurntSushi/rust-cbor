@@ -248,3 +248,23 @@ fn return_error_on_incomplete_read() {
     let mut dec = Decoder::from_bytes(&buf[0..4]);
     assert!(dec.decode::<String>().next().unwrap().is_err());
 }
+
+/// Test for issue #8
+#[test]
+fn test_tagged_struct_encoding() {
+    use rustc_serialize::Encoder;
+
+    struct MyDataStructure {
+        pub data: u64,
+    }
+
+    impl Encodable for MyDataStructure {
+        fn encode<E: Encoder>(&self, e: &mut E) -> Result<(), E::Error> {
+            CborTagEncode::new(43, &self.data).encode(e)
+        }
+    }
+
+    let mut e = ::cbor::Encoder::from_memory();
+    e.encode(&[MyDataStructure {data: 42}]).unwrap();
+    assert_eq!(e.as_bytes(), [216, 43, 24, 42]);
+}

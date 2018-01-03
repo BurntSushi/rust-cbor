@@ -54,10 +54,6 @@ impl<W: io::Write> Encoder<W> {
             self.write_num(1, (-1 - n) as u64)
         }
     }
-
-    fn is_tag_field(&self, name: &str) -> bool {
-        self.tag && name.starts_with("__cbor_tag_encode")
-    }
 }
 
 impl<W: io::Write> Encoder<W> {
@@ -314,21 +310,14 @@ impl<W: io::Write> RustcEncoder for Encoder<W> {
     ) -> CborResult<()>
     where F: FnOnce(&mut Encoder<W>) -> CborResult<()> {
         no_string_key!(self, Type::Map);
-        match name {
-            "CborTag" => {
-                self.tag = true;
-                let v = f(self);
-                self.tag = false;
-                return v;
-            }
-            "CborTagEncode" => {
-                self.tag = true;
-                let v = f(self);
-                self.tag = false;
-                return v;
-            }
-            "CborBytes" => { self.byte_string = true; }
-            _ => { try!(self.write_num(5, len as u64)); }
+        // skip the struct header for the following
+        if name != "CborTag" &&
+           name != "CborTagEncode" &&
+           name != "CborBytes" {
+            try!(self.write_num(5, len as u64));
+        }
+        if name == "CborBytes" {
+            self.byte_string = true;
         }
         f(self)
     }
@@ -341,10 +330,18 @@ impl<W: io::Write> RustcEncoder for Encoder<W> {
     ) -> CborResult<()>
     where F: FnOnce(&mut Encoder<W>) -> CborResult<()> {
         no_string_key!(self);
-        if !self.byte_string && !self.is_tag_field(f_name) {
-            try!(self.emit_str(f_name));
+        if f_name == "__cbor_tag_encode_tag" {
+            assert!(!self.tag);
+            self.tag = true;
+            let v = f(self);
+            self.tag = false;
+            v
+        } else {
+            if !self.byte_string && f_name != "__cbor_tag_encode_data" {
+                try!(self.emit_str(f_name));
+            }
+            f(self)
         }
-        f(self)
     }
 
     fn emit_tuple<F>(&mut self, len: usize, f: F) -> CborResult<()>
