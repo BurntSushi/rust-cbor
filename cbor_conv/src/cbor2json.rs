@@ -20,10 +20,9 @@ fn main() {
         );
     }
     let mut dec = Decoder::from_reader(io::stdin());
-    let cbor = match dec.items().next() {
-        None => { return; },
-        Some(result) => ordie!(result),
-    };
-    let json = cbor.to_json().pretty().to_string();
-    print!("{}", json);
+    for result in dec.items() {
+        let cbor = ordie!(result);
+        let json = cbor.to_json().pretty().to_string();
+        println!("{}", json);
+    }
 }
