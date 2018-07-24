@@ -25,6 +25,10 @@ impl<R: io::Read> Decoder<R> {
     }
 }
 
+fn is_indefinite(first: u8) -> bool {
+    (first & 0b000_11111) == 0b000_11111
+}
+
 impl<R: io::Read> Decoder<R> {
     /// Decode a sequence of top-level CBOR data items into Rust values.
     ///
@@ -164,63 +168,133 @@ impl<R: io::Read> Decoder<R> {
     }
 
     fn read_tag(&mut self, first: u8) -> CborResult<Cbor> {
-        let tag = try!(self.read_uint(first));
+        let tag = self.read_uint(first)?;
         let tag = try!(tag.to_u64().map_err(|err| self.errat(err)));
         let data = try!(self.read_data_item(None));
         Ok(Cbor::Tag(CborTag { tag: tag, data: Box::new(data) }))
     }
 
-    fn read_map(&mut self, first: u8) -> CborResult<Cbor> {
-        let len = try!(self.read_len(first));
-        let mut map = HashMap::with_capacity(len);
+    fn read_map_key(&mut self, first: Option<u8>) -> CborResult<String> {
         let at = self.rdr.bytes_read; // for coherent error reporting
-        for _ in 0..len {
-            let key = match try!(self.read_data_item(None)) {
-                Cbor::Unicode(s) => s,
-                Cbor::Bytes(CborBytes(bytes)) => {
-                    match String::from_utf8(bytes) {
-                        Ok(s) => s,
-                        Err(err) => return Err(CborError::AtOffset {
-                            kind: ReadError::Other(err.to_string()),
-                            offset: at,
-                        }),
-                    }
+        match self.read_data_item(first)? {
+            Cbor::Unicode(s) => Ok(s),
+            Cbor::Bytes(CborBytes(bytes)) => {
+                match String::from_utf8(bytes) {
+                    Ok(s) => Ok(s),
+                    Err(err) => return Err(CborError::AtOffset {
+                        kind: ReadError::Other(err.to_string()),
+                        offset: at,
+                    }),
                 }
-                v => return Err(CborError::AtOffset {
-                    kind: ReadError::mismatch(Type::Unicode, &v),
-                    offset: at,
-                }),
-            };
-            let val = try!(self.read_data_item(None));
-            map.insert(key, val);
+            }
+            v => return Err(CborError::AtOffset {
+                kind: ReadError::mismatch(Type::Unicode, &v),
+                offset: at,
+            }),
+        }
+    }
+
+    fn read_map(&mut self, first: u8) -> CborResult<Cbor> {
+
+        let mut map: HashMap<String,Cbor>;
+
+        if is_indefinite(first) {
+            map = HashMap::new();
+            loop {
+                let first = self.rdr.read_u8()?;
+                if 0xff == first {
+                    break;
+                }
+                let key = self.read_map_key(Some(first))?;
+                let val = self.read_data_item(None)?;
+                map.insert(key, val);
+            }
+        }else {
+            let len = try!(self.read_len(first));
+            map = HashMap::with_capacity(len);
+            for _ in 0..len {
+                let key = self.read_map_key(None)?;
+                let val = try!(self.read_data_item(None));
+                map.insert(key, val);
+            }
         }
         Ok(Cbor::Map(map))
     }
 
     fn read_array(&mut self, first: u8) -> CborResult<Cbor> {
-        let len = try!(self.read_len(first));
-        let mut array = Vec::with_capacity(cmp::min(100000, len));
-        for _ in 0..len {
-            let v = try!(self.read_data_item(None));
-            array.push(v);
+        let mut array: Vec<Cbor>;
+
+        if is_indefinite(first) {
+            array = vec![];
+            loop {
+                let v = self.read_data_item(None)?;
+                if Cbor::Break == v {
+                    break
+                }
+                array.push(v)
+            }
+        } else {
+            let len = self.read_len(first)?;
+            array = Vec::with_capacity(cmp::min(100000, len));
+            for _ in 0..len {
+                let v = self.read_data_item(None)?;
+                array.push(v);
+            }
         }
+
         Ok(Cbor::Array(array))
     }
 
     fn read_string(&mut self, first: u8) -> CborResult<Cbor> {
-        let len = try!(self.read_len(first));
-        let mut buf = vec_from_elem(len, 0u8);
-        try!(self.rdr.read_full(&mut buf));
-        String::from_utf8(buf)
-               .map(Cbor::Unicode)
-               .map_err(|err| self.errstr(err.utf8_error().to_string()))
+
+        // Indefinite length, consume chunks until "break"
+        if is_indefinite(first) {
+            let mut chunks: Vec<String> = vec![];
+
+            loop {
+                let at = self.rdr.bytes_read; // for coherent error reporting
+                match self.read_data_item(None)? {
+                    Cbor::Unicode(u) => chunks.push(u),
+                    Cbor::Break => return Ok(Cbor::Unicode(chunks.concat())),
+                    other => return Err(CborError::AtOffset {
+                        kind: ReadError::mismatch(Type::Unicode, &other),
+                        offset: at
+                    })
+                }
+            }
+
+        } else {
+            let len = try!(self.read_len(first));
+            let mut buf: Vec<u8> = vec_from_elem(len, 0u8);
+            try!(self.rdr.read_full(&mut buf));
+
+            String::from_utf8(buf)
+                .map(Cbor::Unicode)
+                .map_err(|err| self.errstr(err.utf8_error().to_string()))
+        }
     }
 
     fn read_bytes(&mut self, first: u8) -> CborResult<Cbor> {
-        let len = try!(self.read_len(first));
-        let mut buf = vec_from_elem(len, 0u8);
-        try!(self.rdr.read_full(&mut buf));
-        Ok(Cbor::Bytes(CborBytes(buf)))
+        if is_indefinite(first) {
+            let mut chunks: Vec<Vec<u8>> = vec![];
+
+            loop {
+                let at = self.rdr.bytes_read; // for coherent error reporting
+                match self.read_data_item(None)? {
+                    Cbor::Bytes(b) => chunks.push(b.to_vec()),
+                    Cbor::Break => return Ok(Cbor::Bytes(CborBytes(chunks.concat()))),
+                    other => return Err(CborError::AtOffset {
+                        kind: ReadError::mismatch(Type::Bytes, &other),
+                        offset: at,
+                    })
+                }
+            }
+        } else {
+            let len = try!(self.read_len(first));
+            let mut buf = vec_from_elem(len, 0u8);
+            try!(self.rdr.read_full(&mut buf));
+            Ok(Cbor::Bytes(CborBytes(buf)))
+        }
     }
 
     fn read_len(&mut self, first: u8) -> CborResult<usize> {
