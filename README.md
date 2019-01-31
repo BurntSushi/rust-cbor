@@ -1,3 +1,7 @@
+THIS PROJECT IS UNMAINTAINED. USE
+[`serde_cbor`](https://github.com/pyfisch/cbor)
+INSTEAD.
+
 This crate provides an implementation of [RFC
 7049](https://tools.ietf.org/html/rfc7049), which specifies Concise Binary
 Object Representation (CBOR). CBOR adopts and modestly builds on the *data
