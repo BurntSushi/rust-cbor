@@ -1,28 +1,73 @@
-extern crate cbor;
-extern crate rustc_serialize;
+use std::io::{self, BufReader, Write};
+use std::process;
 
-use std::io::{self, Write};
+use cbor::Value;
 
-use cbor::Decoder;
-use rustc_serialize::json::ToJson;
-
-macro_rules! err {
-    ($($arg:tt)*) => ({ let _ = writeln!(&mut io::stderr(), $($arg)*); });
+// Reads a stream of CBOR items from stdin and writes each of them to
+// stdout as a pretty-printed JSON value.
+//
+// CBOR constructs that have no JSON equivalent are converted as follows:
+// byte strings become lowercase hex strings, non-string map keys are
+// JSON-encoded into strings, non-finite floats become null, tags are
+// dropped (the inner value is kept) and the "undefined" simple value
+// becomes null.
+fn main() {
+    if let Err(err) = run() {
+        eprintln!("cbor2json: {err}");
+        process::exit(1);
+    }
 }
 
-fn main() {
-    macro_rules! ordie {
-        ($e:expr) => (
-            match $e {
-                Ok(v) => v,
-                Err(err) => { err!("{}", err); ::std::process::exit(1); }
-            }
-        );
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let stdin = BufReader::new(io::stdin());
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+
+    for item in cbor::de::Deserializer::from_reader(stdin).into_iter::<Value>() {
+        let json = to_json(item?);
+        serde_json::to_writer_pretty(&mut stdout, &json)?;
+        stdout.write_all(b"\n")?;
     }
-    let mut dec = Decoder::from_reader(io::stdin());
-    for result in dec.items() {
-        let cbor = ordie!(result);
-        let json = cbor.to_json().pretty().to_string();
-        println!("{}", json);
+
+    Ok(stdout.flush()?)
+}
+
+fn to_json(value: Value) -> serde_json::Value {
+    use serde_json::Value as Json;
+
+    match value {
+        Value::Null => Json::Null,
+        Value::Bool(x) => Json::Bool(x),
+        Value::Integer(x) => match (u64::try_from(x), i64::try_from(x)) {
+            (Ok(x), _) => Json::from(x),
+            (_, Ok(x)) => Json::from(x),
+            // Outside both ranges (e.g. near -2^64): fall back to a string.
+            _ => Json::String(i128::from(x).to_string()),
+        },
+        Value::Float(x) => serde_json::Number::from_f64(x).map_or(Json::Null, Json::Number),
+        Value::Bytes(x) => Json::String(hex(&x)),
+        Value::Text(x) => Json::String(x),
+        Value::Tag(_, x) => to_json(*x),
+        Value::Array(x) => Json::Array(x.into_iter().map(to_json).collect()),
+        Value::Map(x) => Json::Object(
+            x.into_iter()
+                .map(|(k, v)| {
+                    let key = match k {
+                        Value::Text(s) => s,
+                        other => serde_json::to_string(&to_json(other)).unwrap_or_default(),
+                    };
+                    (key, to_json(v))
+                })
+                .collect(),
+        ),
+        _ => Json::Null,
     }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
 }

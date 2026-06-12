@@ -1,25 +1,25 @@
-extern crate cbor;
-extern crate rustc_serialize;
+use std::io::{self, Read, Write};
+use std::process;
 
-use std::io::{self, Write};
-
-use cbor::{Encoder, ToCbor};
-use rustc_serialize::json::Json;
-
-macro_rules! err {
-    ($($arg:tt)*) => ({ let _ = writeln!(&mut io::stderr(), $($arg)*); });
+// Reads a stream of JSON values from stdin and writes each of them to
+// stdout as a CBOR item.
+fn main() {
+    if let Err(err) = run() {
+        eprintln!("json2cbor: {err}");
+        process::exit(1);
+    }
 }
 
-fn main() {
-    macro_rules! ordie {
-        ($e:expr) => (
-            match $e {
-                Ok(v) => v,
-                Err(err) => { err!("{}", err); ::std::process::exit(1); }
-            }
-        );
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input)?;
+
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+
+    for value in serde_json::Deserializer::from_str(&input).into_iter::<serde_json::Value>() {
+        cbor::to_writer(&value?, &mut stdout)?;
     }
-    let json = ordie!(Json::from_reader(&mut io::stdin()));
-    let mut enc = Encoder::from_writer(io::stdout());
-    ordie!(enc.encode(&[json.to_cbor()]));
+
+    Ok(stdout.flush()?)
 }

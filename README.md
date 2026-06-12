@@ -1,142 +1,154 @@
-THIS PROJECT IS UNMAINTAINED. USE
-[`serde_cbor`](https://github.com/pyfisch/cbor)
-INSTEAD.
+# cbor
 
-This crate provides an implementation of [RFC
-7049](https://tools.ietf.org/html/rfc7049), which specifies Concise Binary
-Object Representation (CBOR). CBOR adopts and modestly builds on the *data
-model* used by JSON, except the encoding is in binary form. Its primary goals
-include a balance of implementation size, message size and extensibility.
+A serde implementation of [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)
+— the Concise Binary Object Representation (CBOR) — for Rust.
 
-[![Build status](https://api.travis-ci.org/BurntSushi/rust-cbor.png)](https://travis-ci.org/BurntSushi/rust-cbor)
-[![](http://meritbadge.herokuapp.com/cbor)](https://crates.io/crates/cbor)
+[![CI](https://github.com/ldclabs/rust-cbor/actions/workflows/ci.yml/badge.svg)](https://github.com/ldclabs/rust-cbor/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/cbor.svg)](https://crates.io/crates/cbor)
+[![docs.rs](https://docs.rs/cbor/badge.svg)](https://docs.rs/cbor)
+
+CBOR adopts and modestly builds on the *data model* used by JSON, except the
+encoding is in binary form. Its primary goals include a balance of
+implementation size, message size and extensibility.
 
 Dual-licensed under MIT or the [UNLICENSE](http://unlicense.org).
 
+## Status
 
-### Documentation
+This crate was created by [Andrew Gallant](https://github.com/BurntSushi) in
+2015 and built on the pre-serde `rustc-serialize` framework; it went
+unmaintained for many years. Version 0.5 is a from-scratch rewrite on top of
+[serde](https://serde.rs), now maintained by [LDC Labs](https://github.com/ldclabs).
+None of the 0.4 API survives.
 
-The API is fully documented with examples:
-[http://burntsushi.net/rustdoc/cbor/](http://burntsushi.net/rustdoc/cbor/).
+The rewrite follows the design of (and is wire-compatible with)
+[ciborium](https://github.com/enarx/ciborium) — many thanks to its authors.
+If you need `no_std` support today, use ciborium; this crate currently
+requires `std`.
 
+## Features
 
-### Installation
+* **Full serde integration** — `#[derive(Serialize, Deserialize)]` types
+  encode and decode directly.
+* **RFC 8949 preferred serialization** — integers and floats are always
+  encoded in their smallest lossless form, including half-precision floats.
+* **A dynamic [`Value`] type** — the CBOR analogue of `serde_json::Value`,
+  with a `cbor!` macro for building values in JSON-like syntax.
+* **Tag support** — capture and emit semantic tags (RFC 8949 §3.4) through
+  the wrapper types in the `tag` module; `u128`/`i128` map to bignum tags
+  automatically.
+* **Deterministic encoding** — `to_canonical_vec`/`to_canonical_writer` and
+  `Value::canonicalize` implement the core deterministic encoding
+  requirements (RFC 8949 §4.2.1): bytewise lexicographic map key order,
+  definite lengths, preferred serializations, normalized bignums and NaN.
+  For protocols built on the older RFC 7049 §3.9 "Canonical CBOR" rule
+  (kept as RFC 8949 §4.2.3, and used by ciborium's canonical module), the
+  `*_with` variants take `KeyOrder::LengthFirst`.
+* **Robust decoding** — indefinite-length items, segmented strings,
+  duplicate map keys, unknown tags and CBOR sequences (RFC 8742) are all
+  handled; recursion is depth-limited and forged lengths cannot trigger
+  huge allocations.
+* **A low-level header codec** — the `core` module exposes the pull/push
+  `Header` interface for applications that need precise wire control.
 
-This crate works with Cargo and is on
-[crates.io](https://crates.io/crates/cbor). The package is regularly updated.
-Add it to your `Cargo.toml` like so:
+## Usage
 
 ```toml
 [dependencies]
-cbor = "0.3"
+cbor = "0.5"
 ```
 
-
-### Example: simple type based encoding and decoding
-
-In this crate, there is a `Decoder` and an `Encoder`. All reading and writing
-of CBOR must go through one of these types.
-
-The following shows how use those types to encode and decode a sequence of data
-items:
+### Type-based encoding and decoding
 
 ```rust
-extern crate cbor;
+use serde::{Deserialize, Serialize};
 
-use cbor::{Decoder, Encoder};
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+struct Photo {
+    title: String,
+    pixels: (u32, u32),
+    tags: Vec<String>,
+}
 
-fn main() {
-    // The data we want to encode. Each element in the list is encoded as its
-    // own separate top-level data item.
-    let data = vec![('a', 1), ('b', 2), ('c', 3)];
+let photo = Photo {
+    title: "Sunrise".into(),
+    pixels: (1920, 1080),
+    tags: vec!["morning".into(), "gradient".into()],
+};
 
-    // Create an in memory encoder. Use `Encoder::from_writer` to write to
-    // anything that implements `Writer`.
-    let mut e = Encoder::from_memory();
-    e.encode(&data).unwrap();
+let bytes = cbor::to_vec(&photo).unwrap();
+let back: Photo = cbor::from_slice(&bytes).unwrap();
+assert_eq!(photo, back);
+```
 
-    // Create an in memory decoder. Use `Decoder::from_reader` to read from
-    // anything that implements `Reader`.
-    let mut d = Decoder::from_bytes(e.as_bytes());
-    let items: Vec<(char, i32)> = d.decode().collect::<Result<_, _>>().unwrap();
+`to_writer` and `from_reader` work with any `std::io::Write`/`Read`, and
+`Deserializer::into_iter` decodes a stream of concatenated items.
 
-    assert_eq!(items, data);
+### Dynamic values
+
+```rust
+use cbor::{cbor, Value};
+
+let value = cbor!({
+    "code" => 415,
+    "message" => null,
+    "extra" => { "numbers" => [8.2341e+4, 0.251425] },
+}).unwrap();
+
+let bytes = cbor::to_vec(&value).unwrap();
+let back: Value = cbor::from_slice(&bytes).unwrap();
+assert_eq!(value, back);
+```
+
+### Tags
+
+```rust
+use cbor::tag::RequireExact;
+
+// Tag 0: standard date/time string.
+let datetime = RequireExact::<String, 0>("2013-03-21T20:04:00Z".into());
+let bytes = cbor::to_vec(&datetime).unwrap();
+assert_eq!(bytes[0], 0xc0);
+```
+
+## Design decisions
+
+This implementation deliberately matches ciborium's wire behavior, so the
+two crates interoperate byte for byte:
+
+* Numbers always encode in their smallest lossless form, as deterministic
+  encoding (RFC 8949 §4.2.1) requires. Integer width in Rust is treated as
+  an in-memory detail, not a wire property.
+* Enums encode as a bare string (unit variants) or a single-entry map
+  `{variant: payload}` (everything else).
+* `Value` maps are `Vec<(Value, Value)>`, preserving wire order and
+  arbitrary keys.
+* Decoding follows the robustness principle: indefinite lengths, segmented
+  strings, half-width floats and unknown tags are accepted even though
+  encoding never produces them.
+
+## Command line tools
+
+The workspace ships two small converters in `cbor_conv`:
+
+```bash
+$ echo '{"name": "example", "ok": true}' | json2cbor | cbor2json
+{
+  "name": "example",
+  "ok": true
 }
 ```
 
-There are [more examples in the docs](http://burntsushi.net/rustdoc/cbor/).
+## Roadmap
 
+* `no_std` + `alloc` support
+* Benchmarks against other CBOR implementations
 
-### Status of implementation
+## Minimum supported Rust version
 
-The big thing missing at the moment is indefinite length encoding. It's easy
-enough to implement, but I'm still trying to think of the best way to expose it
-in the API.
+Rust 1.85.
 
-Otherwise, all core CBOR features are implemented. There is support for tags,
-but none of the tags in the IANA registry are implemented. It isn't clear to me
-whether these implementations should appear in this crate or in others. Perhaps
-this would be a good use of Cargo's optional features.
+## License
 
-Finally, CBOR maps are only allowed to have Unicode string keys. This was
-easiest to implement, but perhaps this restriction should be lifted in the
-future.
-
-
-### Benchmarks
-
-Here are some very rough (and too simplistic) benchmarks that compare CBOR with
-JSON. Absolute performance is pretty bad (sans CBOR encoding), but this should
-at least give a good ballpark for relative performance with JSON:
-
-```
-test decode_medium_cbor   ... bench:  15525074 ns/iter (+/- 348424) = 25 MB/s
-test decode_medium_json   ... bench:  18356213 ns/iter (+/- 620645) = 30 MB/s
-test decode_small_cbor    ... bench:      1299 ns/iter (+/- 6) = 30 MB/s
-test decode_small_json    ... bench:      1471 ns/iter (+/- 11) = 38 MB/s
-test encode_medium_cbor   ... bench:   1379671 ns/iter (+/- 24828) = 289 MB/s
-test encode_medium_json   ... bench:   8053979 ns/iter (+/- 110462) = 70 MB/s
-test encode_medium_tojson ... bench:  15589704 ns/iter (+/- 559355) = 36 MB/s
-test encode_small_cbor    ... bench:      2685 ns/iter (+/- 69) = 14 MB/s
-test encode_small_json    ... bench:       862 ns/iter (+/- 1) = 64 MB/s
-test encode_small_tojson  ... bench:      1313 ns/iter (+/- 6) = 42 MB/s
-test read_medium_cbor     ... bench:  10008308 ns/iter (+/- 101995) = 39 MB/s
-test read_medium_json     ... bench:  14853023 ns/iter (+/- 510215) = 38 MB/s
-test read_small_cbor      ... bench:       763 ns/iter (+/- 4) = 52 MB/s
-test read_small_json      ... bench:      1127 ns/iter (+/- 4) = 49 MB/s
-```
-
-If these benchmarks are perplexing to you, then you might want to check out
-[Erick Tryzelaar's series of blog
-posts](http://erickt.github.io/blog/2014/10/28/serialization/)
-on Rust's serialization infrastructure. In short,
-[it's being worked on](https://github.com/erickt/rust-serde).
-
-Relatedly, a compounding reason why decoding CBOR is so slow is because it is
-decoded into an intermediate abstract syntax first. A faster (but more complex)
-implementation would skip this step, but it is difficult to do performantly
-with the existing serialization infrastructure. (The same approach is used
-in JSON decoding too, but it should be much easier to eschew this with CBOR
-since it doesn't have the complexity overhead of parsing text.)
-
-
-### Alternatives
-
-[TyOverby's excellent `bincode`](https://github.com/TyOverby/bincode) library
-fulfills a similar use case as `cbor`: both crates serialize and deserialize
-between Rust values and a binary representation. Here is a brief comparison
-(please ping me if I've gotten any of this wrong or if I've left out other
-crucial details):
-
-* CBOR is an IETF standard with implementations in
-  [many languages](http://cbor.io/impls.html). This means you can use CBOR
-  to easily communicate with programs written in other programming languages.
-* `cbor` tags every data item encoded, including every number. `bincode` does
-  not, which means the compactness of the resulting binary data depends on your
-  data. For example, using `cbor`, encoding a `Vec<u64>` will encode every
-  integer using a variable width encoding while `bincode` will use 8 bytes for
-  every number. This results in various trade offs in terms of serialization
-  speed, the size of the data and the flexibility of encoding/decoding with
-  Rust types. (e.g., With `bincode` you must decode with precisely the same
-  integer size as what was encoded, but `cbor` can adjust on the fly and
-  decode, e.g., an encoded `u16` into a `u64`.)
+Dual-licensed under MIT or the [UNLICENSE](http://unlicense.org), like the
+original crate.
