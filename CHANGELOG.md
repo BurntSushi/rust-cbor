@@ -20,6 +20,10 @@ been removed entirely.
 * Preferred serialization: smallest lossless width for integers and floats,
   including IEEE 754 half-precision.
 * `Deserializer::into_iter` for decoding CBOR sequences (RFC 8742).
+* Allocation-free helpers: `validate` checks an input for well-formedness
+  (RFC 8949 §5.3.1, plus text UTF-8 validity) and `serialized_size`
+  computes the exact encoded size of a value without buffering output.
+  `collect_str` no longer buffers formatted output either.
 * Deterministic encoding via `to_canonical_vec`, `to_canonical_writer` and
   `Value::canonicalize`: map key sorting, duplicate key rejection, bignum
   reduction to preferred form and NaN normalization. Both deterministic key

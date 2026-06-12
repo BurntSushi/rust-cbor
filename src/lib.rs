@@ -72,6 +72,22 @@ let bytes = cbor::to_vec(&uri).unwrap();
 assert_eq!(bytes[0], 0xd8); // tag(32)
 ```
 
+# Allocation-free helpers
+
+Two helpers inspect data without building it: [`validate`] checks that an
+input is exactly one well-formed CBOR item (including text UTF-8 validity),
+and [`serialized_size`] computes the exact encoded size of any
+serializable value. Neither allocates heap memory.
+
+```rust
+let value = ("hello", vec![1u8, 2, 3]);
+let bytes = cbor::to_vec(&value).unwrap();
+
+assert_eq!(cbor::serialized_size(&value).unwrap(), bytes.len() as u64);
+assert!(cbor::validate(&bytes[..]).is_ok());
+assert!(cbor::validate(&bytes[..bytes.len() - 1]).is_err()); // truncated
+```
+
 # Deterministic encoding
 
 [`to_canonical_vec`]/[`to_canonical_writer`] produce output satisfying the
@@ -148,11 +164,11 @@ pub mod tag;
 pub mod value;
 
 #[doc(inline)]
-pub use crate::de::{from_reader, from_slice};
+pub use crate::de::{from_reader, from_slice, validate};
 #[doc(inline)]
 pub use crate::ser::{
-    to_canonical_vec, to_canonical_vec_with, to_canonical_writer, to_canonical_writer_with, to_vec,
-    to_writer,
+    serialized_size, to_canonical_vec, to_canonical_vec_with, to_canonical_writer,
+    to_canonical_writer_with, to_vec, to_writer,
 };
 #[doc(inline)]
 pub use crate::value::{KeyOrder, Value};

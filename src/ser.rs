@@ -338,6 +338,71 @@ impl<'a, W: Write> ser::Serializer for &'a mut Serializer<W> {
         })
     }
 
+    // The default implementation buffers the formatted output in a String;
+    // formatting twice (once to measure the text header, once to stream the
+    // body) avoids the allocation.
+    fn collect_str<T: ?Sized + core::fmt::Display>(self, value: &T) -> Result<(), Error> {
+        use core::fmt::Write as _;
+
+        struct Counter(usize);
+
+        impl core::fmt::Write for Counter {
+            fn write_str(&mut self, s: &str) -> core::fmt::Result {
+                self.0 += s.len();
+                Ok(())
+            }
+        }
+
+        let mut counter = Counter(0);
+        if write!(&mut counter, "{value}").is_err() {
+            return Err(Error::Value("Display implementation failed".into()));
+        }
+
+        self.0.push(Header::Text(Some(counter.0)))?;
+
+        struct Body<'a, W> {
+            encoder: &'a mut Encoder<W>,
+            remaining: usize,
+            error: Option<std::io::Error>,
+        }
+
+        impl<W: Write> core::fmt::Write for Body<'_, W> {
+            fn write_str(&mut self, s: &str) -> core::fmt::Result {
+                if s.len() > self.remaining {
+                    return Err(core::fmt::Error);
+                }
+
+                match self.encoder.write_all(s.as_bytes()) {
+                    Ok(()) => {
+                        self.remaining -= s.len();
+                        Ok(())
+                    }
+                    Err(err) => {
+                        self.error = Some(err);
+                        Err(core::fmt::Error)
+                    }
+                }
+            }
+        }
+
+        let mut body = Body {
+            encoder: &mut self.0,
+            remaining: counter.0,
+            error: None,
+        };
+        let result = write!(&mut body, "{value}");
+
+        if let Some(err) = body.error {
+            return Err(Error::Io(err));
+        }
+        if result.is_err() || body.remaining != 0 {
+            return Err(Error::Value(
+                "Display implementation is not deterministic".into(),
+            ));
+        }
+        Ok(())
+    }
+
     #[inline]
     fn is_human_readable(&self) -> bool {
         false
@@ -509,6 +574,41 @@ pub fn to_vec<T: ?Sized + ser::Serialize>(value: &T) -> Result<Vec<u8>, Error> {
     Ok(buffer)
 }
 
+/// Computes the exact number of bytes that [`to_writer`] would produce for
+/// a value, without writing or buffering anything.
+///
+/// The value is serialized through the regular serializer into a counting
+/// sink, so the result is exact by construction (including preferred float
+/// widths, bignums, tags and indefinite-length containers) and no memory is
+/// allocated.
+///
+/// ```rust
+/// let value = ("hello", 42u64, vec![1u8, 2, 3]);
+/// let size = cbor::serialized_size(&value).unwrap();
+/// assert_eq!(size as usize, cbor::to_vec(&value).unwrap().len());
+/// ```
+pub fn serialized_size<T: ?Sized + ser::Serialize>(value: &T) -> Result<u64, Error> {
+    let mut counter = ByteCounter(0);
+    to_writer(value, &mut counter)?;
+    Ok(counter.0)
+}
+
+// A sink that discards everything written to it, keeping only the count.
+struct ByteCounter(u64);
+
+impl Write for ByteCounter {
+    #[inline]
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        self.0 += data.len() as u64;
+        Ok(data.len())
+    }
+
+    #[inline]
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// Serializes a value as deterministically encoded CBOR into a
 /// [`std::io::Write`], satisfying the core deterministic encoding
 /// requirements of RFC 8949 §4.2.1.
@@ -560,4 +660,17 @@ pub fn to_canonical_vec_with<T: ?Sized + ser::Serialize>(
     let mut buffer = Vec::new();
     to_canonical_writer_with(value, &mut buffer, order)?;
     Ok(buffer)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_counter_is_a_well_behaved_sink() {
+        let mut counter = ByteCounter(0);
+        counter.write_all(b"12345").unwrap();
+        counter.flush().unwrap();
+        assert_eq!(counter.0, 5);
+    }
 }

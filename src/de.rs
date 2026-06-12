@@ -871,6 +871,183 @@ impl<T: de::DeserializeOwned, R: Read> Iterator for Iter<T, R> {
     }
 }
 
+/// Checks that the input contains exactly one well-formed CBOR item.
+///
+/// The input is walked structurally without building any values: **no heap
+/// memory is allocated**. String bodies are skipped through a fixed-size
+/// stack buffer and nesting is bounded by [`DEFAULT_RECURSION_LIMIT`], so
+/// adversarial input can neither exhaust memory nor the stack.
+///
+/// Beyond well-formedness (RFC 8949 §5.3.1) this verifies that text strings
+/// are valid UTF-8 (every segment of an indefinite-length text string on
+/// its own, as the RFC requires). Unassigned simple values are accepted:
+/// they are well-formed, even though the serde interface has no
+/// representation for them.
+///
+/// Trailing data after the item is an error; to handle a CBOR sequence
+/// (RFC 8742), validate items one at a time from the shared reader.
+///
+/// ```rust
+/// assert!(cbor::validate(&b"\x83\x01\x02\x03"[..]).is_ok()); // [1, 2, 3]
+/// assert!(cbor::validate(&b"\x83\x01\x02"[..]).is_err()); // truncated
+/// assert!(cbor::validate(&b"\x62\xff\xfe"[..]).is_err()); // invalid UTF-8
+/// ```
+pub fn validate<R: Read>(reader: R) -> Result<(), Error> {
+    let mut decoder = Decoder::from(reader);
+    validate_item(&mut decoder, DEFAULT_RECURSION_LIMIT)?;
+
+    // The item must be followed by the end of the input.
+    let offset = decoder.offset();
+    let mut probe = [0u8; 1];
+    match decoder.read_exact(&mut probe) {
+        Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => Ok(()),
+        Err(err) => Err(Error::Io(err)),
+        Ok(()) => Err(Error::semantic(offset, "trailing data after the item")),
+    }
+}
+
+fn validate_item<R: Read>(decoder: &mut Decoder<R>, depth: usize) -> Result<(), Error> {
+    let offset = decoder.offset();
+    let header = decoder.pull()?;
+    validate_header(decoder, header, offset, depth)
+}
+
+fn validate_header<R: Read>(
+    decoder: &mut Decoder<R>,
+    header: Header,
+    offset: usize,
+    depth: usize,
+) -> Result<(), Error> {
+    if depth == 0 {
+        return Err(Error::RecursionLimitExceeded);
+    }
+
+    match header {
+        Header::Positive(..) | Header::Negative(..) | Header::Float(..) | Header::Simple(..) => {
+            Ok(())
+        }
+
+        Header::Break => Err(Error::Syntax(offset)),
+
+        Header::Tag(..) => validate_item(decoder, depth - 1),
+
+        Header::Bytes(len) => match len {
+            Some(len) => skip_body(decoder, len),
+            None => loop {
+                let offset = decoder.offset();
+                match decoder.pull()? {
+                    Header::Break => return Ok(()),
+                    // Segments must be definite-length strings of the same
+                    // major type (RFC 8949 §3.2.3).
+                    Header::Bytes(Some(len)) => skip_body(decoder, len)?,
+                    _ => return Err(Error::Syntax(offset)),
+                }
+            },
+        },
+
+        Header::Text(len) => match len {
+            Some(len) => check_utf8_body(decoder, len),
+            None => loop {
+                let offset = decoder.offset();
+                match decoder.pull()? {
+                    Header::Break => return Ok(()),
+                    Header::Text(Some(len)) => check_utf8_body(decoder, len)?,
+                    _ => return Err(Error::Syntax(offset)),
+                }
+            },
+        },
+
+        Header::Array(len) => match len {
+            Some(len) => {
+                for _ in 0..len {
+                    validate_item(decoder, depth - 1)?;
+                }
+                Ok(())
+            }
+            None => loop {
+                let offset = decoder.offset();
+                match decoder.pull()? {
+                    Header::Break => return Ok(()),
+                    header => validate_header(decoder, header, offset, depth - 1)?,
+                }
+            },
+        },
+
+        Header::Map(len) => match len {
+            Some(len) => {
+                for _ in 0..len {
+                    validate_item(decoder, depth - 1)?; // key
+                    validate_item(decoder, depth - 1)?; // value
+                }
+                Ok(())
+            }
+            None => {
+                let mut expecting_value = false;
+                loop {
+                    let offset = decoder.offset();
+                    match decoder.pull()? {
+                        // A break in place of a value leaves a dangling key,
+                        // which is not well-formed (RFC 8949 §5.3.1).
+                        Header::Break if expecting_value => return Err(Error::Syntax(offset)),
+                        Header::Break => return Ok(()),
+                        header => {
+                            validate_header(decoder, header, offset, depth - 1)?;
+                            expecting_value = !expecting_value;
+                        }
+                    }
+                }
+            }
+        },
+    }
+}
+
+// Discards a definite-length body through a fixed-size buffer; a forged
+// length cannot trigger an allocation.
+fn skip_body<R: Read>(decoder: &mut Decoder<R>, mut remaining: usize) -> Result<(), Error> {
+    let mut buffer = [0u8; 4096];
+    while remaining > 0 {
+        let n = remaining.min(buffer.len());
+        decoder.read_exact(&mut buffer[..n])?;
+        remaining -= n;
+    }
+    Ok(())
+}
+
+// Discards a definite-length text body, verifying that the whole body is
+// valid UTF-8. Characters may straddle the internal chunk boundaries; up to
+// three trailing bytes of an incomplete character carry over to the next
+// chunk.
+fn check_utf8_body<R: Read>(decoder: &mut Decoder<R>, len: usize) -> Result<(), Error> {
+    let offset = decoder.offset();
+    let mut buffer = [0u8; 4096];
+    let mut carry = 0usize;
+    let mut remaining = len;
+
+    while remaining > 0 {
+        let n = remaining.min(buffer.len() - carry);
+        decoder.read_exact(&mut buffer[carry..carry + n])?;
+        remaining -= n;
+        let filled = carry + n;
+
+        match core::str::from_utf8(&buffer[..filled]) {
+            Ok(..) => carry = 0,
+            Err(err) => {
+                // An incomplete character is only acceptable while more
+                // body bytes are coming.
+                if err.error_len().is_some() || remaining == 0 {
+                    return Err(Error::Syntax(offset));
+                }
+
+                let valid = err.valid_up_to();
+                buffer.copy_within(valid..filled, 0);
+                carry = filled - valid;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Deserializes a value from CBOR read out of a [`std::io::Read`].
 ///
 /// For repeated small reads consider wrapping the reader in a

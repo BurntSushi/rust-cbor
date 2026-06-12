@@ -48,6 +48,10 @@ requires `std`.
   duplicate map keys, unknown tags and CBOR sequences (RFC 8742) are all
   handled; recursion is depth-limited and forged lengths cannot trigger
   huge allocations.
+* **Allocation-free helpers** — `validate` checks that an input is exactly
+  one well-formed CBOR item (RFC 8949 §5.3.1, including text UTF-8) and
+  `serialized_size` computes the exact encoded size of any serializable
+  value; neither allocates heap memory.
 * **A low-level header codec** — the `core` module exposes the pull/push
   `Header` interface for applications that need precise wire control.
 
