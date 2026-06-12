@@ -131,8 +131,9 @@ impl Value {
                     key.canonicalize_with(order)?;
                     val.canonicalize_with(order)?;
 
-                    let encoded = crate::ser::to_vec(&key)
-                        .map_err(|err| Error::custom(format_args!("unencodable key: {err}")))?;
+                    // Encoding a Value into a Vec cannot actually fail;
+                    // the error mapping is purely defensive.
+                    let encoded = crate::ser::to_vec(&key).map_err(Error::custom)?;
                     keyed.push((encoded, key, val));
                 }
 

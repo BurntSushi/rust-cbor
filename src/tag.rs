@@ -554,3 +554,153 @@ impl ser::Serializer for TagNumberSerializer {
         false
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde::de::value::{BytesDeserializer, Error as DeError, StrDeserializer};
+    use serde::de::{IgnoredAny, VariantAccess as _, Visitor};
+    use serde::ser::{Error as _, Serializer as _};
+
+    use super::*;
+
+    #[test]
+    fn tag_number_serializer_accepts_unsigned_integers() {
+        assert_eq!(7u8.serialize(TagNumberSerializer).unwrap(), 7);
+        assert_eq!(7u16.serialize(TagNumberSerializer).unwrap(), 7);
+        assert_eq!(7u32.serialize(TagNumberSerializer).unwrap(), 7);
+        assert_eq!(7u64.serialize(TagNumberSerializer).unwrap(), 7);
+        assert!(!TagNumberSerializer.is_human_readable());
+    }
+
+    #[test]
+    fn tag_number_serializer_rejects_everything_else() {
+        assert!(TagNumberSerializer.serialize_bool(true).is_err());
+        assert!(TagNumberSerializer.serialize_i8(1).is_err());
+        assert!(TagNumberSerializer.serialize_i16(1).is_err());
+        assert!(TagNumberSerializer.serialize_i32(1).is_err());
+        assert!(TagNumberSerializer.serialize_i64(1).is_err());
+        assert!(TagNumberSerializer.serialize_i128(1).is_err());
+        assert!(TagNumberSerializer.serialize_u128(1).is_err());
+        assert!(TagNumberSerializer.serialize_f32(1.0).is_err());
+        assert!(TagNumberSerializer.serialize_f64(1.0).is_err());
+        assert!(TagNumberSerializer.serialize_char('a').is_err());
+        assert!(TagNumberSerializer.serialize_str("a").is_err());
+        assert!(TagNumberSerializer.serialize_bytes(b"a").is_err());
+        assert!(TagNumberSerializer.serialize_none().is_err());
+        assert!(TagNumberSerializer.serialize_some(&1u8).is_err());
+        assert!(TagNumberSerializer.serialize_unit().is_err());
+        assert!(TagNumberSerializer.serialize_unit_struct("x").is_err());
+        assert!(TagNumberSerializer
+            .serialize_unit_variant("x", 0, "y")
+            .is_err());
+        assert!(TagNumberSerializer
+            .serialize_newtype_struct("x", &1u8)
+            .is_err());
+        assert!(TagNumberSerializer
+            .serialize_newtype_variant("x", 0, "y", &1u8)
+            .is_err());
+        assert!(TagNumberSerializer.serialize_seq(None).is_err());
+        assert!(TagNumberSerializer.serialize_tuple(0).is_err());
+        assert!(TagNumberSerializer.serialize_tuple_struct("x", 0).is_err());
+        assert!(TagNumberSerializer
+            .serialize_tuple_variant("x", 0, "y", 0)
+            .is_err());
+        assert!(TagNumberSerializer.serialize_map(None).is_err());
+        assert!(TagNumberSerializer.serialize_struct("x", 0).is_err());
+        assert!(TagNumberSerializer
+            .serialize_struct_variant("x", 0, "y", 0)
+            .is_err());
+    }
+
+    #[test]
+    fn not_a_tag_error() {
+        assert_eq!(NotATag.to_string(), "expected tag");
+        assert_eq!(NotATag::custom("ignored").to_string(), "expected tag");
+        assert!(format!("{NotATag:?}").contains("NotATag"));
+    }
+
+    // A visitor that drives the full TagAccess tuple flow, collecting the
+    // tag number and the parent item, then confirming the end of the
+    // sequence.
+    struct Pair;
+
+    impl<'de> Visitor<'de> for Pair {
+        type Value = (u64, String);
+
+        fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            write!(f, "a tag pair")
+        }
+
+        fn visit_seq<A: de::SeqAccess<'de>>(self, mut acc: A) -> Result<Self::Value, A::Error> {
+            let tag: u64 = acc.next_element().unwrap().unwrap();
+            let val: String = acc.next_element().unwrap().unwrap();
+            assert!(acc.next_element::<IgnoredAny>().unwrap().is_none());
+            Ok((tag, val))
+        }
+    }
+
+    #[test]
+    fn tag_access_tagged_flow() {
+        let access = TagAccess::new(StrDeserializer::<DeError>::new("body"), Some(42));
+
+        let (name, variant) = de::EnumAccess::variant::<String>(access).unwrap();
+        assert_eq!(name, TAGGED);
+
+        // Visitors describe themselves through `Expected`.
+        assert_eq!(format!("{}", &Pair as &dyn de::Expected), "a tag pair");
+
+        let (tag, val) = variant.tuple_variant(2, Pair).unwrap();
+        assert_eq!((tag, val.as_str()), (42, "body"));
+    }
+
+    #[test]
+    fn tag_access_untagged_flow() {
+        let access = TagAccess::new(StrDeserializer::<DeError>::new("body"), None);
+
+        let (name, variant) = de::EnumAccess::variant::<String>(access).unwrap();
+        assert_eq!(name, UNTAGGED);
+
+        let val: String = variant.newtype_variant().unwrap();
+        assert_eq!(val, "body");
+    }
+
+    #[test]
+    fn tag_access_propagates_seed_failures() {
+        // A variant seed that cannot absorb the synthesized variant name.
+        let access = TagAccess::new(StrDeserializer::<DeError>::new("x"), Some(1));
+        assert!(de::EnumAccess::variant::<bool>(access).is_err());
+
+        // A tuple visitor whose first element seed rejects the tag number.
+        struct BoolFirst;
+
+        impl<'de> Visitor<'de> for BoolFirst {
+            type Value = ();
+
+            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                write!(f, "a bool")
+            }
+
+            fn visit_seq<A: de::SeqAccess<'de>>(self, mut acc: A) -> Result<(), A::Error> {
+                assert!(acc.next_element::<bool>().is_err());
+                Ok(())
+            }
+        }
+
+        assert_eq!(format!("{}", &BoolFirst as &dyn de::Expected), "a bool");
+
+        let access = TagAccess::new(StrDeserializer::<DeError>::new("x"), Some(1));
+        let (_, variant) = de::EnumAccess::variant::<String>(access).unwrap();
+        variant.tuple_variant(2, BoolFirst).unwrap();
+    }
+
+    #[test]
+    fn tag_access_rejects_other_variant_shapes() {
+        let access = TagAccess::new(BytesDeserializer::<DeError>::new(b"x"), Some(1));
+        let (_, variant) = de::EnumAccess::variant::<String>(access).unwrap();
+        assert!(variant.unit_variant().is_err());
+
+        let access = TagAccess::new(BytesDeserializer::<DeError>::new(b"x"), Some(1));
+        let (_, variant) = de::EnumAccess::variant::<String>(access).unwrap();
+        assert!(variant.struct_variant(&[], IgnoredAny).is_err());
+    }
+}

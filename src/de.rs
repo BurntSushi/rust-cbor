@@ -209,13 +209,10 @@ impl<R: Read> Deserializer<R> {
     }
 
     // Pulls the next integer item, skipping any tags other than the bignum
-    // tags. `header` optionally supplies an already-pulled header.
-    fn number(&mut self, mut header: Option<Header>) -> Result<Num, Error> {
+    // tags.
+    fn number(&mut self) -> Result<Num, Error> {
         loop {
-            let header = match header.take() {
-                Some(h) => h,
-                None => self.decoder.pull()?,
-            };
+            let header = self.decoder.pull()?;
 
             let neg = match header {
                 Header::Positive(x) => return Ok(Num::Pos(x)),
@@ -226,17 +223,7 @@ impl<R: Read> Deserializer<R> {
                 header => return Err(header.expected("integer")),
             };
 
-            let mut bytes = Vec::new();
-            match self.decoder.pull()? {
-                Header::Bytes(len) => self.decoder.bytes_body(len, &mut bytes)?,
-                header => return Err(header.expected("bytes")),
-            }
-
-            // An empty payload encodes zero (RFC 8949 §3.4.3); strip
-            // leading zeros so the length reflects the magnitude.
-            let first = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
-            bytes.drain(..first);
-
+            let bytes = self.bignum()?;
             return Ok(match neg {
                 false => Num::BigPos(bytes),
                 true => Num::BigNeg(bytes),
@@ -244,8 +231,23 @@ impl<R: Read> Deserializer<R> {
         }
     }
 
+    // Reads the byte string payload following a bignum tag (2 or 3) and
+    // strips its leading zeros: an empty result encodes zero (RFC 8949
+    // §3.4.3).
+    fn bignum(&mut self) -> Result<Vec<u8>, Error> {
+        let mut bytes = Vec::new();
+        match self.decoder.pull()? {
+            Header::Bytes(len) => self.decoder.bytes_body(len, &mut bytes)?,
+            header => return Err(header.expected("bytes")),
+        }
+
+        let first = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
+        bytes.drain(..first);
+        Ok(bytes)
+    }
+
     fn unsigned(&mut self) -> Result<u128, Error> {
-        match self.number(None)? {
+        match self.number()? {
             Num::Pos(x) => Ok(x.into()),
             Num::BigPos(b) => big_to_u128(&b).ok_or_else(|| de::Error::custom("bigint too large")),
             _ => Err(de::Error::custom("unexpected negative integer")),
@@ -253,7 +255,7 @@ impl<R: Read> Deserializer<R> {
     }
 
     fn signed(&mut self) -> Result<i128, Error> {
-        let raw = match self.number(None)? {
+        let raw = match self.number()? {
             Num::Pos(x) => return Ok(x.into()),
             Num::Neg(x) => return Ok(x as i128 ^ !0),
             Num::BigPos(b) => {
@@ -279,6 +281,38 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
     #[inline]
     fn deserialize_any<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
         let header = self.decoder.pull()?;
+
+        // Tags are handled here directly; everything else is pushed back
+        // and re-dispatched to the matching typed entry point.
+        if let Header::Tag(tag) = header {
+            return match tag {
+                // Bignums lossy-coerce into plain integers whenever they
+                // fit; otherwise they survive as a tagged byte string.
+                tag::BIGPOS | tag::BIGNEG => {
+                    let b = self.bignum()?;
+
+                    let int = match big_to_u128(&b) {
+                        Some(x) if tag == tag::BIGPOS => return visitor.visit_u128(x),
+                        Some(x) => i128::try_from(x).ok().map(|x| x ^ !0),
+                        None => None,
+                    };
+
+                    match int {
+                        Some(x) => visitor.visit_i128(x),
+                        None => {
+                            let access = TagAccess::new(BytesDeserializer::new(&b), Some(tag));
+                            visitor.visit_enum(access)
+                        }
+                    }
+                }
+
+                _ => self.recurse(|me| {
+                    let access = TagAccess::new(me, Some(tag));
+                    visitor.visit_enum(access)
+                }),
+            };
+        }
+
         self.decoder.push(header);
 
         match header {
@@ -294,40 +328,6 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
             Header::Array(..) => self.deserialize_seq(visitor),
             Header::Map(..) => self.deserialize_map(visitor),
 
-            Header::Tag(tag) => {
-                let _: Header = self.decoder.pull()?;
-
-                match tag {
-                    // Bignums lossy-coerce into plain integers whenever they
-                    // fit; otherwise they survive as a tagged byte string.
-                    tag::BIGPOS | tag::BIGNEG => match self.number(Some(Header::Tag(tag)))? {
-                        Num::BigPos(b) => match big_to_u128(&b) {
-                            Some(x) => visitor.visit_u128(x),
-                            None => {
-                                let access = TagAccess::new(BytesDeserializer::new(&b), Some(tag));
-                                visitor.visit_enum(access)
-                            }
-                        },
-                        Num::BigNeg(b) => {
-                            match big_to_u128(&b).and_then(|x| i128::try_from(x).ok()) {
-                                Some(x) => visitor.visit_i128(x ^ !0),
-                                None => {
-                                    let access =
-                                        TagAccess::new(BytesDeserializer::new(&b), Some(tag));
-                                    visitor.visit_enum(access)
-                                }
-                            }
-                        }
-                        _ => unreachable!(),
-                    },
-
-                    _ => self.recurse(|me| {
-                        let access = TagAccess::new(me, Some(tag));
-                        visitor.visit_enum(access)
-                    }),
-                }
-            }
-
             Header::Float(..) => self.deserialize_f64(visitor),
 
             Header::Simple(simple::FALSE) => self.deserialize_bool(visitor),
@@ -336,7 +336,8 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
             Header::Simple(simple::UNDEFINED) => self.deserialize_option(visitor),
             h @ Header::Simple(..) => Err(h.expected("known simple value")),
 
-            h @ Header::Break => Err(h.expected("non-break")),
+            // Only `Break` is left: the tag case was handled above.
+            h => Err(h.expected("non-break")),
         }
     }
 

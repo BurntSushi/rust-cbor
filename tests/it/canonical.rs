@@ -214,3 +214,38 @@ fn canonical_decode_encode_roundtrip_is_stable() {
     assert_eq!(once, twice);
     assert_eq!(hex::encode(&once), "a2617a01626161 820102".replace(' ', ""));
 }
+
+#[test]
+fn non_bytes_bignum_payloads_pass_through() {
+    // A bignum tag whose payload is not a byte string is left alone (it is
+    // not a valid bignum, so there is nothing to reduce).
+    let mut value = Value::Tag(2, Box::new(Value::Null));
+    value.canonicalize().unwrap();
+    assert_eq!(value, Value::Tag(2, Box::new(Value::Null)));
+}
+
+#[test]
+fn nested_canonicalize_failures_propagate() {
+    let dup = || {
+        Value::Map(vec![
+            (Value::from(1), Value::Null),
+            (Value::from(1), Value::Null),
+        ])
+    };
+
+    // ...from inside an array,
+    let mut v = Value::Array(vec![dup()]);
+    assert!(v.canonicalize().is_err());
+    // ...from inside a non-bignum tag,
+    let mut v = Value::Tag(9, Box::new(dup()));
+    assert!(v.canonicalize().is_err());
+    // ...from inside a bignum tag (the payload is checked first),
+    let mut v = Value::Tag(2, Box::new(dup()));
+    assert!(v.canonicalize().is_err());
+    // ...from a map key,
+    let mut v = Value::Map(vec![(dup(), Value::Null)]);
+    assert!(v.canonicalize().is_err());
+    // ...and from a map value.
+    let mut v = Value::Map(vec![(Value::Null, dup())]);
+    assert!(v.canonicalize().is_err());
+}

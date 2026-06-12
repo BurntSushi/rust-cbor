@@ -266,3 +266,47 @@ fn stream_of_items() {
     assert_eq!(iter.next().unwrap().unwrap(), 1);
     assert!(iter.next().unwrap().is_err());
 }
+
+#[test]
+fn integer_wire_forms() {
+    // Positive values through the signed entry points.
+    assert_wire(7i8, "07");
+    assert_wire(7i64, "07");
+    assert_wire(2i128, "02");
+    assert_wire(-2i128, "21");
+}
+
+// serde only reports a sequence length when the iterator's size hint is
+// exact, so a filtered iterator produces an indefinite-length array.
+struct Unsized;
+
+impl Serialize for Unsized {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq((1u8..=3).filter(|_| true))
+    }
+}
+
+// A map of unknown size produces an indefinite-length map.
+struct UnsizedMap;
+
+impl Serialize for UnsizedMap {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut acc = serializer.serialize_map(None)?;
+        acc.serialize_entry(&1u8, &2u8)?;
+        acc.end()
+    }
+}
+
+#[test]
+fn indefinite_containers_encode() {
+    assert_wire(Unsized, "9f010203ff");
+    assert_eq!(
+        cbor::from_slice::<Vec<u8>>(&cbor::to_vec(&Unsized).unwrap()).unwrap(),
+        vec![1, 2, 3]
+    );
+
+    assert_wire(UnsizedMap, "bf0102ff");
+    let map: BTreeMap<u8, u8> = cbor::from_slice(&cbor::to_vec(&UnsizedMap).unwrap()).unwrap();
+    assert_eq!(map, [(1, 2)].into());
+}

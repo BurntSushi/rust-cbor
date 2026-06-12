@@ -26,6 +26,12 @@ impl From<std::io::Error> for Error {
     }
 }
 
+impl From<crate::value::Error> for Error {
+    fn from(value: crate::value::Error) -> Self {
+        Self::Value(value.to_string())
+    }
+}
+
 impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
@@ -538,10 +544,8 @@ pub fn to_canonical_writer_with<T: ?Sized + ser::Serialize, W: Write>(
     writer: W,
     order: KeyOrder,
 ) -> Result<(), Error> {
-    let convert = |err: crate::value::Error| Error::Value(err.to_string());
-
-    let mut value = crate::value::Value::serialized(value).map_err(convert)?;
-    value.canonicalize_with(order).map_err(convert)?;
+    let mut value = crate::value::Value::serialized(value)?;
+    value.canonicalize_with(order)?;
     to_writer(&value, writer)
 }
 

@@ -346,6 +346,13 @@ impl<R: Read> Decoder<R> {
             Arg::Indefinite => None,
         };
 
+        // On 64-bit targets every u64 length fits in usize; on smaller
+        // targets an unrepresentable length is reported as a syntax error
+        // (nothing that large could be read anyway).
+        #[cfg(target_pointer_width = "64")]
+        let len = |arg: Arg| Ok::<_, Error>(int(arg).map(|x| x as usize));
+
+        #[cfg(not(target_pointer_width = "64"))]
         let len = |arg: Arg| match int(arg) {
             Some(x) => usize::try_from(x)
                 .map(Some)
@@ -361,7 +368,8 @@ impl<R: Read> Decoder<R> {
             4 => Header::Array(len(arg)?),
             5 => Header::Map(len(arg)?),
             6 => Header::Tag(int(arg).ok_or(Error::Syntax(start))?),
-            7 => match arg {
+            // `major` is a three-bit value, so the only remaining case is 7.
+            _ => match arg {
                 Arg::This(x) => Header::Simple(x),
                 // RFC 8949 §3.3: a 0xf8 prefix followed by a byte less than
                 // 0x20 is not well-formed.
@@ -372,7 +380,6 @@ impl<R: Read> Decoder<R> {
                 Arg::Next8(x) => Header::Float(f64::from_bits(x)),
                 Arg::Indefinite => Header::Break,
             },
-            _ => unreachable!(),
         })
     }
 
@@ -565,14 +572,20 @@ mod tests {
     #[test]
     fn f16_rejects_lossy() {
         for value in [
-            f64::MIN_POSITIVE, // far below the subnormal range
-            65504.0 + 32.0,    // above f16::MAX
-            65536.0,           // 2^16, exponent out of range
-            1.1,               // fraction bits beyond 10
-            5.960464477539063e-8 / 2.0,
+            f64::MIN_POSITIVE,          // far below the subnormal range
+            65504.0 + 32.0,             // above f16::MAX
+            65536.0,                    // 2^16, exponent out of range
+            1.1,                        // fraction bits beyond 10
+            5.960464477539063e-8 / 2.0, // below the smallest subnormal
+            1.5 * 5.960464477539063e-8, // subnormal range, dropped bits
         ] {
             assert_eq!(f64_to_f16(value), None, "{value}");
         }
+
+        // NaNs whose sign or payload would be lost are rejected by the
+        // round-trip check; only the canonical quiet NaN converts.
+        assert_eq!(f64_to_f16(-f64::NAN), None);
+        assert_eq!(f64_to_f16(f64::from_bits(0x7ff8_0000_0000_0001)), None);
     }
 
     // Headers round-trip through encode and decode.

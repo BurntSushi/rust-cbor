@@ -640,3 +640,22 @@ impl Value {
         T::deserialize(Deserializer(self))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The generic map access reports an exact size hint only when the
+    // underlying iterator provides one.
+    #[test]
+    fn size_hint_follows_the_iterator() {
+        let pairs = [(Value::Null, Value::Null), (Value::Null, Value::Null)];
+
+        let exact = Deserializer(pairs.iter().peekable());
+        assert_eq!(de::MapAccess::size_hint(&exact), Some(2));
+
+        // A filtered iterator no longer knows its exact length.
+        let inexact = Deserializer(pairs.iter().filter(|_| true).peekable());
+        assert_eq!(de::MapAccess::size_hint(&inexact), None);
+    }
+}

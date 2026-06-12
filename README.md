@@ -144,6 +144,15 @@ $ echo '{"name": "example", "ok": true}' | json2cbor | cbor2json
 * `no_std` + `alloc` support
 * Benchmarks against other CBOR implementations
 
+## Testing
+
+`cargo test` runs the unit tests, a single integration-test binary and the
+doc tests — including the RFC 8949 Appendix A vectors and fault-injection
+tests for I/O failures and malformed input. Line coverage of the library is
+100% (measured with `cargo llvm-cov`); the only never-executed regions are
+five error branches that are unreachable on 64-bit targets or guard
+conditions that cannot occur.
+
 ## Minimum supported Rust version
 
 Rust 1.85.
