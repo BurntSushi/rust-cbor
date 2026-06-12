@@ -94,7 +94,8 @@ assert!(cbor::validate(&bytes[..bytes.len() - 1]).is_err()); // truncated
 RFC 8949 §8 — handy for logs and debugging. Working on the wire, it can
 show what a [`Value`] cannot represent: indefinite-length markers,
 `undefined`, and unassigned simple values. `Value` implements
-[`Display`](std::fmt::Display) with the same notation.
+[`Display`](std::fmt::Display) with the same notation, and
+[`Debug`](std::fmt::Debug) pretty-prints it with two-space indentation.
 
 ```rust
 let bytes = hex::decode("bf61610161629f0203ffff").unwrap();

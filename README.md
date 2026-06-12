@@ -50,8 +50,9 @@ requires `std`.
   huge allocations.
 * **Diagnostic notation** — `diagnostic` renders raw CBOR as the
   human-readable text of RFC 8949 §8 (matching the Appendix A examples
-  exactly, indefinite-length markers and all), and `Value` implements
-  `Display` with the same notation.
+  exactly, indefinite-length markers and all); `Value` implements
+  `Display` with the same notation and `Debug` as its indented,
+  multi-line form.
 * **Allocation-free helpers** — `validate` checks that an input is exactly
   one well-formed CBOR item (RFC 8949 §5.3.1, including text UTF-8) and
   `serialized_size` computes the exact encoded size of any serializable

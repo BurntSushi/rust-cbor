@@ -328,3 +328,70 @@ fn float_formatting_boundaries() {
         assert_eq!(Value::Float(*x).to_string(), *expected, "{x:?}");
     }
 }
+
+#[test]
+fn value_debug_is_indented_diagnostic_notation() {
+    // Scalars (including bignum tags) stay on one line.
+    assert_eq!(format!("{:?}", Value::from(1)), "1");
+    assert_eq!(format!("{:?}", Value::from("水")), "\"\\u6c34\"");
+    assert_eq!(format!("{:?}", Value::Float(1.5)), "1.5");
+    assert_eq!(format!("{:?}", Value::Bool(true)), "true");
+    assert_eq!(format!("{:?}", Value::Null), "null");
+    assert_eq!(format!("{:?}", Value::Bytes(vec![1, 2])), "h'0102'");
+    assert_eq!(
+        format!("{:?}", Value::from(u64::MAX as u128 + 1)),
+        "18446744073709551616"
+    );
+
+    // Empty containers stay compact.
+    assert_eq!(format!("{:?}", Value::Array(vec![])), "[]");
+    assert_eq!(format!("{:?}", Value::Map(vec![])), "{}");
+
+    // Non-empty containers spread, two spaces per level.
+    let value = cbor!([1, [2, 3]]).unwrap();
+    assert_eq!(format!("{value:?}"), "[\n  1,\n  [\n    2,\n    3\n  ]\n]");
+
+    let value = cbor!({
+        "a" => 1,
+        "b" => { "c" => [true, {}] },
+    })
+    .unwrap();
+    let expected = r#"{
+  "a": 1,
+  "b": {
+    "c": [
+      true,
+      {}
+    ]
+  }
+}"#;
+    assert_eq!(format!("{value:?}"), expected);
+
+    // Tags wrap their (possibly spread) content...
+    let tagged = Value::Tag(99, Box::new(cbor!([1]).unwrap()));
+    assert_eq!(format!("{tagged:?}"), "99([\n  1\n])");
+    // ...and non-bytes bignum tags fall back to the tag form, for both
+    // bignum tag numbers.
+    let odd = Value::Tag(2, Box::new(Value::Null));
+    assert_eq!(format!("{odd:?}"), "2(null)");
+    let odd = Value::Tag(3, Box::new(Value::Null));
+    assert_eq!(format!("{odd:?}"), "3(null)");
+    assert_eq!(
+        format!("{:?}", Value::from(-(u64::MAX as i128) - 2)),
+        "-18446744073709551617"
+    );
+
+    // Container keys are laid out too.
+    let value = Value::Map(vec![(cbor!([1]).unwrap(), Value::Null)]);
+    assert_eq!(format!("{value:?}"), "{\n  [\n    1\n  ]: null\n}");
+
+    // A failing formatter propagates the error.
+    use std::fmt::Write as _;
+    struct FailFmt;
+    impl std::fmt::Write for FailFmt {
+        fn write_str(&mut self, _: &str) -> std::fmt::Result {
+            Err(std::fmt::Error)
+        }
+    }
+    assert!(write!(FailFmt, "{:?}", Value::Null).is_err());
+}

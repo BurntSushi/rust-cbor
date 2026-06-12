@@ -548,3 +548,71 @@ pub(crate) fn write_value(out: &mut String, value: &Value) {
         }
     }
 }
+
+// Renders a `Value` as indented diagnostic notation; backs `Debug for
+// Value`. Scalars (including bignum tags) render exactly as in the
+// compact form; arrays and maps spread one element per line, indented by
+// two spaces per level.
+pub(crate) fn write_value_pretty(out: &mut String, value: &Value, indent: usize) {
+    match value {
+        Value::Tag(tag::BIGPOS | tag::BIGNEG, inner)
+            if matches!(inner.as_ref(), Value::Bytes(..)) =>
+        {
+            write_value(out, value);
+        }
+
+        Value::Tag(t, inner) => {
+            let _ = write!(out, "{t}(");
+            write_value_pretty(out, inner, indent);
+            out.push(')');
+        }
+
+        Value::Array(items) => {
+            if items.is_empty() {
+                out.push_str("[]");
+                return;
+            }
+
+            out.push_str("[\n");
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(",\n");
+                }
+                push_indent(out, indent + 1);
+                write_value_pretty(out, item, indent + 1);
+            }
+            out.push('\n');
+            push_indent(out, indent);
+            out.push(']');
+        }
+
+        Value::Map(pairs) => {
+            if pairs.is_empty() {
+                out.push_str("{}");
+                return;
+            }
+
+            out.push_str("{\n");
+            for (i, (key, val)) in pairs.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(",\n");
+                }
+                push_indent(out, indent + 1);
+                write_value_pretty(out, key, indent + 1);
+                out.push_str(": ");
+                write_value_pretty(out, val, indent + 1);
+            }
+            out.push('\n');
+            push_indent(out, indent);
+            out.push('}');
+        }
+
+        scalar => write_value(out, scalar),
+    }
+}
+
+fn push_indent(out: &mut String, level: usize) {
+    for _ in 0..level {
+        out.push_str("  ");
+    }
+}

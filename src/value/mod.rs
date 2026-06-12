@@ -47,7 +47,7 @@ impl serde::ser::Error for Error {
 /// makes no assumptions about key uniqueness; `collect()` the pairs into a
 /// map type of your choice if you need one.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, PartialEq, PartialOrd)]
 pub enum Value {
     /// An integer (major type 0 or 1).
     Integer(Integer),
@@ -75,6 +75,30 @@ pub enum Value {
 
     /// A map (major type 5).
     Map(Vec<(Value, Value)>),
+}
+
+/// Formats the value as indented CBOR diagnostic notation (RFC 8949 §8).
+///
+/// This is the multi-line counterpart of the [`Display`](Self#impl-Display-for-Value)
+/// implementation: arrays and maps spread one element per line, nested
+/// levels are indented by two spaces, and scalars render exactly as in
+/// the compact form.
+///
+/// ```
+/// use cbor::cbor;
+///
+/// let value = cbor!({ "a" => [1, 2] }).unwrap();
+/// assert_eq!(
+///     format!("{value:?}"),
+///     "{\n  \"a\": [\n    1,\n    2\n  ]\n}"
+/// );
+/// ```
+impl core::fmt::Debug for Value {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut out = String::new();
+        crate::diag::write_value_pretty(&mut out, self, 0);
+        f.write_str(&out)
+    }
 }
 
 macro_rules! accessors {

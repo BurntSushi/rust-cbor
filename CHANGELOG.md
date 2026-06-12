@@ -24,7 +24,8 @@ been removed entirely.
   human-readable text byte-for-byte equal to the Appendix A examples,
   preserving indefinite-length forms, `undefined` and unassigned simple
   values, and writing bignums as plain integers; `Value` implements
-  `Display` with the same notation.
+  `Display` with the same notation, and `Debug` pretty-prints it with
+  two-space indentation.
 * Allocation-free helpers: `validate` checks an input for well-formedness
   (RFC 8949 §5.3.1, plus text UTF-8 validity) and `serialized_size`
   computes the exact encoded size of a value without buffering output.
