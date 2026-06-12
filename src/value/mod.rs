@@ -303,6 +303,26 @@ impl Value {
     }
 }
 
+/// Formats the value in CBOR diagnostic notation (RFC 8949 §8).
+///
+/// Byte strings appear as `h'..'`, text is escaped to pure ASCII in the
+/// style of RFC 8949 Appendix A, floats always carry a decimal point or
+/// exponent and bignum tags (2 and 3) are written as plain integers.
+///
+/// ```
+/// use cbor::{cbor, Value};
+///
+/// let value = cbor!({ "k" => [1, -2.5, null] }).unwrap();
+/// assert_eq!(value.to_string(), r#"{"k": [1, -2.5, null]}"#);
+/// ```
+impl core::fmt::Display for Value {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut out = String::new();
+        crate::diag::write_value(&mut out, self);
+        f.write_str(&out)
+    }
+}
+
 macro_rules! implfrom {
     ($($variant:ident($t:ty)),+ $(,)?) => {
         $(

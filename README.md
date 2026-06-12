@@ -48,6 +48,10 @@ requires `std`.
   duplicate map keys, unknown tags and CBOR sequences (RFC 8742) are all
   handled; recursion is depth-limited and forged lengths cannot trigger
   huge allocations.
+* **Diagnostic notation** — `diagnostic` renders raw CBOR as the
+  human-readable text of RFC 8949 §8 (matching the Appendix A examples
+  exactly, indefinite-length markers and all), and `Value` implements
+  `Display` with the same notation.
 * **Allocation-free helpers** — `validate` checks that an input is exactly
   one well-formed CBOR item (RFC 8949 §5.3.1, including text UTF-8) and
   `serialized_size` computes the exact encoded size of any serializable

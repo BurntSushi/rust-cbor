@@ -88,6 +88,25 @@ assert!(cbor::validate(&bytes[..]).is_ok());
 assert!(cbor::validate(&bytes[..bytes.len() - 1]).is_err()); // truncated
 ```
 
+# Diagnostic notation
+
+[`diagnostic`] renders raw CBOR as the human-readable text form of
+RFC 8949 §8 — handy for logs and debugging. Working on the wire, it can
+show what a [`Value`] cannot represent: indefinite-length markers,
+`undefined`, and unassigned simple values. `Value` implements
+[`Display`](std::fmt::Display) with the same notation.
+
+```rust
+let bytes = hex::decode("bf61610161629f0203ffff").unwrap();
+assert_eq!(
+    cbor::diagnostic(&bytes[..]).unwrap(),
+    r#"{_ "a": 1, "b": [_ 2, 3]}"#
+);
+
+let value = cbor::cbor!({ "k" => [1, -2.5, null] }).unwrap();
+assert_eq!(value.to_string(), r#"{"k": [1, -2.5, null]}"#);
+```
+
 # Deterministic encoding
 
 [`to_canonical_vec`]/[`to_canonical_writer`] produce output satisfying the
@@ -159,12 +178,14 @@ This implementation is wire-compatible with
 
 pub mod core;
 pub mod de;
+mod diag;
 pub mod ser;
 pub mod tag;
 pub mod value;
 
 #[doc(inline)]
 pub use crate::de::{from_reader, from_slice, validate};
+pub use crate::diag::diagnostic;
 #[doc(inline)]
 pub use crate::ser::{
     serialized_size, to_canonical_vec, to_canonical_vec_with, to_canonical_writer,

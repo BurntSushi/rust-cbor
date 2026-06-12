@@ -6,6 +6,7 @@
 
 mod canonical;
 mod de_edge;
+mod diag;
 mod errors;
 mod limits;
 mod rfc8949;

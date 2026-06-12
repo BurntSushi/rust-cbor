@@ -895,8 +895,11 @@ impl<T: de::DeserializeOwned, R: Read> Iterator for Iter<T, R> {
 pub fn validate<R: Read>(reader: R) -> Result<(), Error> {
     let mut decoder = Decoder::from(reader);
     validate_item(&mut decoder, DEFAULT_RECURSION_LIMIT)?;
+    expect_eof(&mut decoder)
+}
 
-    // The item must be followed by the end of the input.
+// Requires the input to be exhausted.
+pub(crate) fn expect_eof<R: Read>(decoder: &mut Decoder<R>) -> Result<(), Error> {
     let offset = decoder.offset();
     let mut probe = [0u8; 1];
     match decoder.read_exact(&mut probe) {

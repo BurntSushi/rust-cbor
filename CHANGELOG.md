@@ -20,6 +20,11 @@ been removed entirely.
 * Preferred serialization: smallest lossless width for integers and floats,
   including IEEE 754 half-precision.
 * `Deserializer::into_iter` for decoding CBOR sequences (RFC 8742).
+* Diagnostic notation (RFC 8949 §8): `diagnostic` renders raw CBOR as
+  human-readable text byte-for-byte equal to the Appendix A examples,
+  preserving indefinite-length forms, `undefined` and unassigned simple
+  values, and writing bignums as plain integers; `Value` implements
+  `Display` with the same notation.
 * Allocation-free helpers: `validate` checks an input for well-formedness
   (RFC 8949 §5.3.1, plus text UTF-8 validity) and `serialized_size`
   computes the exact encoded size of a value without buffering output.
