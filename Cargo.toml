@@ -4,11 +4,8 @@ members = [".", "cbor_conv"]
 
 [package]
 name = "cbor"
-version = "0.5.0"  #:version
-authors = [
-    "Andrew Gallant <jamslam@gmail.com>",
-    "0xZensh <txr1883@gmail.com>",
-]
+version = "0.5.0"
+authors = ["Andrew Gallant <jamslam@gmail.com>", "0xZensh <txr1883@gmail.com>"]
 description = "A serde implementation of CBOR (RFC 8949) with a dynamic Value type and tag support."
 homepage = "https://github.com/ldclabs/rust-cbor"
 repository = "https://github.com/ldclabs/rust-cbor"
@@ -25,10 +22,10 @@ exclude = ["doc/", ".github/"]
 name = "cbor"
 
 [dependencies]
-serde = { version = "1.0.170", default-features = false, features = ["std"] }
+serde = { version = "1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-serde = { version = "1.0.170", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
 hex = "0.4"
 
