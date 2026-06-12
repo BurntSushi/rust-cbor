@@ -331,12 +331,14 @@ impl<'de> de::Deserializer<'de> for Deserializer<&Value> {
             value = v;
         }
 
-        match value {
-            Value::Text(x) if x.chars().count() == 1 => {
-                visitor.visit_char(x.chars().next().unwrap())
+        if let Value::Text(x) = value {
+            let mut chars = x.chars();
+            if let (Some(c), None) = (chars.next(), chars.next()) {
+                return visitor.visit_char(c);
             }
-            _ => Err(de::Error::invalid_type(value.into(), &"char")),
         }
+
+        Err(de::Error::invalid_type(value.into(), &"char"))
     }
 
     fn deserialize_str<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {

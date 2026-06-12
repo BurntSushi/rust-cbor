@@ -355,7 +355,16 @@ impl ser::SerializeMap for Serializer<Map> {
 
     #[inline]
     fn serialize_value<U: ?Sized + ser::Serialize>(&mut self, value: &U) -> Result<(), Error> {
-        let key = self.0.temp.take().unwrap();
+        // Tolerate misbehaving Serialize implementations instead of
+        // panicking; serde requires a key before every value.
+        let key = match self.0.temp.take() {
+            Some(key) => key,
+            None => {
+                return Err(ser::Error::custom(
+                    "serialize_value called before serialize_key",
+                ))
+            }
+        };
         let val = Value::serialized(value)?;
 
         self.0.data.push((key, val));

@@ -78,8 +78,9 @@ fn tags_are_skipped_in_typed_positions() {
 #[test]
 fn chars() {
     assert_eq!(de::<char>("63e6b0b4").unwrap(), '水');
-    // Two characters do not make a char.
+    // Two characters do not make a char, and neither do zero.
     assert!(de::<char>("626162").is_err());
+    assert!(de::<char>("60").is_err());
     // Invalid UTF-8 inside a short text item is a syntax error.
     assert!(matches!(de::<char>("62fffe"), Err(Error::Syntax(0))));
     // A text item longer than four bytes cannot be a char.

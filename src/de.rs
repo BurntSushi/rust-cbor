@@ -430,10 +430,13 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
                     self.decoder.read_exact(&mut buffer[..len])?;
 
                     match core::str::from_utf8(&buffer[..len]) {
-                        Ok(s) => match s.chars().count() {
-                            1 => visitor.visit_char(s.chars().next().unwrap()),
-                            _ => Err(header.expected("char")),
-                        },
+                        Ok(s) => {
+                            let mut chars = s.chars();
+                            match (chars.next(), chars.next()) {
+                                (Some(c), None) => visitor.visit_char(c),
+                                _ => Err(header.expected("char")),
+                            }
+                        }
                         Err(..) => Err(Error::Syntax(offset)),
                     }
                 }

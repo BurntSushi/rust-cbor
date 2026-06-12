@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::io::{self, BufReader, Write};
 use std::process;
 
@@ -19,7 +20,7 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let stdin = BufReader::new(io::stdin());
+    let stdin = BufReader::new(io::stdin().lock());
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
 
@@ -54,7 +55,10 @@ fn to_json(value: Value) -> serde_json::Value {
                 .map(|(k, v)| {
                     let key = match k {
                         Value::Text(s) => s,
-                        other => serde_json::to_string(&to_json(other)).unwrap_or_default(),
+                        // Serializing a serde_json::Value to a string cannot
+                        // fail; never fall back to an (ambiguous) empty key.
+                        other => serde_json::to_string(&to_json(other))
+                            .expect("serializing a JSON value cannot fail"),
                     };
                     (key, to_json(v))
                 })
@@ -67,7 +71,7 @@ fn to_json(value: Value) -> serde_json::Value {
 fn hex(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);
     for b in bytes {
-        out.push_str(&format!("{b:02x}"));
+        let _ = write!(out, "{b:02x}");
     }
     out
 }

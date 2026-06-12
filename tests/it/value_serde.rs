@@ -201,6 +201,7 @@ fn deserialized_scalars() {
 
     assert_eq!(Value::from("x").deserialized::<char>().unwrap(), 'x');
     assert!(Value::from("xy").deserialized::<char>().is_err());
+    assert!(Value::from("").deserialized::<char>().is_err());
     assert!(Value::from(1).deserialized::<char>().is_err());
 
     assert_eq!(Value::from("hi").deserialized::<String>().unwrap(), "hi");
@@ -754,4 +755,27 @@ fn enum_variant_names_must_be_valid() {
     // A struct whose field name is not a string.
     let map = Value::Map(vec![(Value::Null, Value::from(1))]);
     assert!(map.deserialized::<Plain>().is_err());
+}
+
+// A misbehaving Serialize that emits a map value with no preceding key;
+// the serializer must report an error rather than panic.
+struct ValueWithoutKey;
+
+impl Serialize for ValueWithoutKey {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut acc = serializer.serialize_map(Some(1))?;
+        acc.serialize_value(&1u8)?;
+        acc.end()
+    }
+}
+
+#[test]
+fn map_value_without_key_is_an_error() {
+    let err = Value::serialized(&ValueWithoutKey).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("serialize_value called before serialize_key"),
+        "{err}"
+    );
 }
